@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { countLiveTasks, hasActiveFilters, LIST_LIMIT, listTasks, type TaskFilters } from "@/lib/tasks/queries";
+import { CheckSquareIcon, SearchIcon } from "./icons";
 import { TaskItem } from "./TaskItem";
 
 export async function TaskList({ filters }: { filters: TaskFilters }) {
@@ -12,13 +13,19 @@ export async function TaskList({ filters }: { filters: TaskFilters }) {
     const filtered = hasActiveFilters(filters) && (await countLiveTasks(supabase)) > 0;
     return filtered ? (
       <div className="empty">
-        <p>No tasks match these filters.</p>
+        <span className="empty-icon" aria-hidden="true">
+          <SearchIcon />
+        </span>
+        <p className="empty-title">No tasks match these filters</p>
         <Link href="/tasks">Clear filters</Link>
       </div>
     ) : (
       <div className="empty">
-        <p>No tasks yet.</p>
-        <p>
+        <span className="empty-icon" aria-hidden="true">
+          <CheckSquareIcon />
+        </span>
+        <p className="empty-title">No tasks yet</p>
+        <p className="muted">
           Add one above, or <Link href="/import">import a CSV file</Link>.
         </p>
       </div>
@@ -27,7 +34,7 @@ export async function TaskList({ filters }: { filters: TaskFilters }) {
 
   return (
     <>
-      <p className="muted">
+      <p className="muted small list-count">
         {truncated ? `Showing the first ${LIST_LIMIT} tasks.` : `${tasks.length} task${tasks.length === 1 ? "" : "s"}`}
       </p>
       <ul className="tasks">

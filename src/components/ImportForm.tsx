@@ -1,28 +1,45 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { importCsv, type ImportState } from "@/app/import/actions";
 import { buildRejectsCsv } from "@/lib/csv/rejects";
 import type { RejectedRow } from "@/lib/csv/types";
+import { DownloadIcon, FileIcon, UploadIcon } from "./icons";
 
 const initialState: ImportState = {};
 const PREVIEW_LENGTH = 60;
 
 export function ImportForm() {
   const [state, formAction, pending] = useActionState(importCsv, initialState);
+  const [chosen, setChosen] = useState<string | null>(null);
   const result = state.result;
 
   return (
     <>
-      <form action={formAction} className="card stack">
-        <label>
-          CSV file (max 1 MB, 5,000 rows)
-          <input type="file" name="file" accept=".csv,text/csv" required />
+      {/* React resets the form after the action runs, clearing the file input, so clear the label too. */}
+      <form action={formAction} onSubmit={() => setChosen(null)} className="card stack">
+        <label className={`dropzone${chosen ? " has-file" : ""}`}>
+          <span className="dropzone-icon" aria-hidden="true">
+            {chosen ? <FileIcon /> : <UploadIcon />}
+          </span>
+          <span className="dropzone-text">
+            <strong>{chosen ?? "Choose a CSV file"}</strong>
+            <span className="muted small">{chosen ? "Click to choose a different file" : "Max 1 MB, 5,000 rows"}</span>
+          </span>
+          <input
+            type="file"
+            name="file"
+            accept=".csv,text/csv"
+            required
+            onChange={(e) => setChosen(e.currentTarget.files?.[0]?.name ?? null)}
+          />
         </label>
-        <button type="submit" disabled={pending}>
-          {pending ? "Importing…" : "Import"}
-        </button>
+        <div>
+          <button type="submit" disabled={pending}>
+            {pending ? "Importing…" : "Import tasks"}
+          </button>
+        </div>
       </form>
 
       {pending ? (
@@ -42,13 +59,13 @@ export function ImportForm() {
         <section aria-labelledby="import-summary">
           <h2 id="import-summary">Import results{state.fileName ? ` for ${state.fileName}` : ""}</h2>
           <ul className="summary">
-            <li>
+            <li className="stat stat-ok">
               <strong>{result.imported}</strong> imported
             </li>
-            <li>
+            <li className={`stat${result.rejected.length > 0 ? " stat-bad" : ""}`}>
               <strong>{result.rejected.length}</strong> rejected
             </li>
-            <li>
+            <li className="stat">
               <strong>{result.blankSkipped}</strong> blank row{result.blankSkipped === 1 ? "" : "s"} skipped
             </li>
           </ul>
@@ -91,12 +108,13 @@ function RejectedTable({
 
   return (
     <>
-      <div className="row">
+      <div className="row section-head">
         <h3>Rejected rows</h3>
         <button type="button" className="secondary" onClick={download}>
-          Download rejected rows (CSV)
+          <DownloadIcon /> Download rejected rows (CSV)
         </button>
       </div>
+      <div className="table-wrap">
       <table>
         <thead>
           <tr>
@@ -134,6 +152,7 @@ function RejectedTable({
           })}
         </tbody>
       </table>
+      </div>
     </>
   );
 }

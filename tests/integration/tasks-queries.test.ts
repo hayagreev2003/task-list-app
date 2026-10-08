@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { listTasks, parseFilters } from "@/lib/tasks/queries";
+import { countTasksByStatus, listTasks, parseFilters } from "@/lib/tasks/queries";
 import { assertSupabaseRunning, createTestUser, deleteTestUsers, type TestUser } from "./helpers";
 
 describe("listTasks", () => {
@@ -64,6 +64,28 @@ describe("listTasks", () => {
     expect(await titles({ priority: "1" })).toEqual(["Read (chapter 3)"]);
     expect(await titles({ status: "todo", q: "read" })).toEqual(["Read (chapter 3)"]);
     expect(await titles({ status: "done", priority: "1" })).toEqual([]);
+  });
+
+  it("counts live tasks per status, ignoring the status filter", async () => {
+    expect(await countTasksByStatus(user.client, parseFilters({}))).toEqual({
+      todo: 4,
+      in_progress: 0,
+      done: 1,
+      all: 5,
+    });
+    // Same counts whichever status tab is selected; search and priority still narrow them.
+    expect(await countTasksByStatus(user.client, parseFilters({ status: "done", q: "50%" }))).toEqual({
+      todo: 0,
+      in_progress: 0,
+      done: 1,
+      all: 1,
+    });
+    expect(await countTasksByStatus(user.client, parseFilters({ priority: "3" }))).toEqual({
+      todo: 2,
+      in_progress: 0,
+      done: 0,
+      all: 2,
+    });
   });
 
   it("ignores invalid filter values", () => {
