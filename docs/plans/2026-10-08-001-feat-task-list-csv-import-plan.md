@@ -1,7 +1,7 @@
 ---
 title: "feat: Task list app with auth, RLS and CSV import"
 type: feat
-status: active
+status: completed
 date: 2026-10-08
 origin: docs/brainstorms/2026-10-08-task-list-csv-import-requirements.md
 ---
@@ -100,7 +100,7 @@ sequenceDiagram
 
 ## Implementation Units
 
-- [ ] **Unit 1: Project setup and tooling**
+- [x] **Unit 1: Project setup and tooling**
 
 **Goal:** A clean repo with Supabase local, Vitest and env wiring.
 
@@ -119,7 +119,7 @@ sequenceDiagram
 
 **Verification:** `npx supabase start` comes up. `npm test` runs (zero tests) and exits 0.
 
-- [ ] **Unit 2: Schema, RLS and import function (migration)**
+- [x] **Unit 2: Schema, RLS and import function (migration)**
 
 **Goal:** A `tasks` table with ownership RLS, the duplicate index, and a transactional import function.
 
@@ -143,7 +143,7 @@ sequenceDiagram
 
 **Verification:** `supabase db reset` applies cleanly. The table shows RLS enabled.
 
-- [ ] **Unit 3: Auth (Supabase SSR clients, Proxy, sign-in/up/out)**
+- [x] **Unit 3: Auth (Supabase SSR clients, Proxy, sign-in/up/out)**
 
 **Goal:** Users can sign up, sign in and sign out. Protected routes redirect.
 
@@ -164,7 +164,7 @@ sequenceDiagram
 
 **Verification:** Two browsers with two accounts each see their own empty list.
 
-- [ ] **Unit 4: Shared validation and CSV core (pure)**
+- [x] **Unit 4: Shared validation and CSV core (pure)**
 
 **Goal:** One source of truth for task field rules, CSV parsing, blank-row handling, in-file dedupe and rejects export.
 
@@ -197,7 +197,7 @@ sequenceDiagram
 
 **Verification:** All unit tests pass with no DB running.
 
-- [ ] **Unit 5: Task list, CRUD and states**
+- [x] **Unit 5: Task list, CRUD and states**
 
 **Goal:** A usable task UI with search, filters, create/edit/complete/soft-delete, and loading/empty/error states.
 
@@ -220,7 +220,7 @@ sequenceDiagram
 
 **Verification:** Every CRUD path works. Filters combine. Each state is visible (empty account, filter with no matches, simulated error).
 
-- [ ] **Unit 6: CSV import action and RPC integration**
+- [x] **Unit 6: CSV import action and RPC integration**
 
 **Goal:** A server-side import that returns imported count, rejected rows with reasons, and blank count.
 
@@ -245,7 +245,7 @@ sequenceDiagram
 
 **Verification:** Integration tests pass against local Supabase.
 
-- [ ] **Unit 7: Import UI and rejects download**
+- [x] **Unit 7: Import UI and rejects download**
 
 **Goal:** An upload page showing results and offering the rejects CSV.
 
@@ -260,7 +260,7 @@ sequenceDiagram
 
 **Verification:** The edge-case file shows the expected table. The downloaded file opens correctly in a spreadsheet.
 
-- [ ] **Unit 8: RLS isolation tests**
+- [x] **Unit 8: RLS isolation tests**
 
 **Goal:** Prove one user can't read or modify another user's tasks at the database layer.
 
@@ -281,7 +281,7 @@ sequenceDiagram
 
 **Verification:** Tests pass. Manually disabling RLS on the table makes them fail (noted in the README as how the test was validated).
 
-- [ ] **Unit 9: Docs, sample data and deliverables**
+- [x] **Unit 9: Docs, sample data and deliverables**
 
 **Goal:** A submittable repo.
 
