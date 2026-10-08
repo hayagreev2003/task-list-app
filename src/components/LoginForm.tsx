@@ -1,12 +1,12 @@
 "use client";
 
 import { useActionState } from "react";
-import { authenticate, type AuthFormState } from "@/app/login/actions";
+import { signIn, type SignInState } from "@/app/login/actions";
 
-const initialState: AuthFormState = {};
+const initialState: SignInState = {};
 
 export function LoginForm() {
-  const [state, formAction, pending] = useActionState(authenticate, initialState);
+  const [state, formAction, pending] = useActionState(signIn, initialState);
 
   return (
     <form action={formAction} className="stack">
@@ -23,24 +23,16 @@ export function LoginForm() {
       </label>
       <label>
         Password
-        <input name="password" type="password" autoComplete="current-password" placeholder="At least 8 characters" required />
+        <input name="password" type="password" autoComplete="current-password" required />
       </label>
       {state.error ? (
         <p role="alert" className="error banner">
           {state.error}
         </p>
       ) : null}
-      {state.message ? (
-        <p role="status" className="notice">
-          {state.message}
-        </p>
-      ) : null}
       <div className="auth-actions">
-        <button type="submit" name="intent" value="signin" disabled={pending}>
-          {pending ? "Please wait…" : "Sign in"}
-        </button>
-        <button type="submit" name="intent" value="signup" className="secondary" disabled={pending}>
-          Create account
+        <button type="submit" disabled={pending}>
+          {pending ? "Signing in…" : "Sign in"}
         </button>
       </div>
     </form>

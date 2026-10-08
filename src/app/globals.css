@@ -403,6 +403,8 @@ details[open] .summary-icon svg { transform: rotate(45deg); }
 .auth-card > p { margin: 0 0 1.4rem; }
 .auth-actions { display: grid; gap: 0.6rem; margin-top: 0.4rem; }
 .auth-actions button { width: 100%; padding: 0.6rem 1rem; }
+.auth-card > .auth-switch, .auth-switch { margin: 1.25rem 0 0; text-align: center; font-size: 0.9rem; color: var(--muted); }
+.auth-switch button.link { font-size: inherit; }
 
 /* ---------- Import ---------- */
 

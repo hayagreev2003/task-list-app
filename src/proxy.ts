@@ -2,7 +2,12 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { supabaseEnv } from "@/lib/supabase/env";
 
-const PUBLIC_PATHS = ["/login"];
+/** Sign-in and sign-up pages: signed-out only, signed-in users are sent on. */
+const SIGNED_OUT_PATHS = ["/login", "/signup"];
+/** Open to everyone: the email link lands here whether or not the browser has a session. */
+const OPEN_PATHS = ["/auth"];
+/** Where a user who followed the sign-up link but hasn't chosen a password must go. */
+const SET_PASSWORD_PATH = "/set-password";
 
 /**
  * Refreshes the Supabase session cookie and makes an optimistic redirect.
@@ -28,22 +33,36 @@ export async function proxy(request: NextRequest) {
 
   // getClaims validates the JWT and refreshes an expired session (writing new cookies above).
   const { data } = await supabase.auth.getClaims();
-  const signedIn = Boolean(data?.claims);
+  const claims = data?.claims;
+  const signedIn = Boolean(claims);
   const { pathname } = request.nextUrl;
-  const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  if (matches(pathname, OPEN_PATHS)) return response;
+  const isSignedOutPage = matches(pathname, SIGNED_OUT_PATHS);
 
-  if (!signedIn && !isPublic) return redirectKeepingCookies(request, response, "/login");
+  if (!signedIn) return isSignedOutPage ? response : redirectKeepingCookies(request, response, "/login");
 
-  if (signedIn && isPublic) {
+  // Set at sign-up and cleared when the password is saved (see /signup and /set-password).
+  const needsPassword = claims?.user_metadata?.needs_password === true;
+  const home = needsPassword ? SET_PASSWORD_PATH : "/tasks";
+
+  if (isSignedOutPage) {
     // getClaims only checks the JWT locally, so a revoked session still looks signed in until
     // the token expires. requireUser() asks the auth server and would send /tasks straight back
-    // here, looping. Confirm with the auth server before leaving /login (only /login pays this),
+    // here, looping. Confirm with the auth server before leaving these pages (only they pay this),
     // and clear the stale session if it fails.
     const { data: userData, error } = await supabase.auth.getUser();
-    if (!error && userData.user) return redirectKeepingCookies(request, response, "/tasks");
+    if (!error && userData.user) return redirectKeepingCookies(request, response, home);
     await supabase.auth.signOut({ scope: "local" });
+    return response;
   }
+
+  const onSetPassword = matches(pathname, [SET_PASSWORD_PATH]);
+  if (needsPassword !== onSetPassword) return redirectKeepingCookies(request, response, home);
   return response;
+}
+
+function matches(pathname: string, paths: string[]) {
+  return paths.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
 function redirectKeepingCookies(request: NextRequest, from: NextResponse, pathname: string) {

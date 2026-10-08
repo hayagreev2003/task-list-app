@@ -9,7 +9,8 @@ A small task-list web app where each signed-in user manages their own tasks and 
 ## What the app does
 
 ### Accounts and privacy
-- Sign up and sign in with email and password.
+- Create an account in steps: enter your email, follow the link we email you, then set and confirm a password and sign in with it.
+- Sign in with email and password.
 - Every user sees **only their own tasks**. This is enforced in the database with row-level security, not only in application code, so a bug in the UI or API can't leak another user's data.
 
 ### Tasks
@@ -59,7 +60,7 @@ npx supabase status -o env       # copy API_URL, PUBLISHABLE_KEY and SECRET_KEY 
 npm run dev                      # http://localhost:3000
 ```
 
-The first `db:start` downloads the Supabase images and takes a few minutes. Email confirmation is off locally, so "Create account" signs you straight in.
+The first `db:start` downloads the Supabase images and takes a few minutes. Locally, sign-up emails aren't really sent: open Mailpit at http://127.0.0.1:54324 to find the verification link.
 
 Other commands:
 
@@ -117,7 +118,9 @@ Local Supabase must be running (`npm run db:start`) with `.env.local` filled in.
 - **Duplicates are guaranteed by the database as well as the app:** a partial unique index on `(user_id, lower(title), due_date) where deleted_at is null`. Titles are stored trimmed.
 - **Import = pure TypeScript core + one Postgres function.** Parsing (papaparse plus our own BOM, blank-row and row-number handling) and validation are pure and unit-tested. The `import_tasks` function (`SECURITY INVOKER`, so RLS applies) inserts every valid row in one statement with `on conflict do nothing` and returns which rows repeated an earlier row in the file and which clashed with existing tasks. Postgres's `lower()` is the only definition of "same title", so the app and the database can't disagree about duplicates. One call is one transaction: any failure means nothing is saved.
 - **One set of validation rules** (`src/lib/tasks/validation.ts`) serves both the form and the import. The form uses `<input type="date">`, which always submits `YYYY-MM-DD`.
-- **Next.js 16:** `src/proxy.ts` (formerly middleware) refreshes the session and redirects signed-out users, but it is only an optimistic check. Before sending a signed-in user away from `/login` it confirms the session with the auth server, so a revoked session can't loop between `/login` and `/tasks`. `requireUser()` runs in every Server Action and data read. Cache Components stays on: session reads sit behind `<Suspense>`, and no task data is cached.
+- **Next.js 16:** `src/proxy.ts` (formerly middleware) refreshes the session and redirects signed-out users, but it is only an optimistic check. Before sending a signed-in user away from `/login` or `/signup` it confirms the session with the auth server, so a revoked session can't loop between `/login` and `/tasks`. `requireUser()` runs in every Server Action and data read. Cache Components stays on: session reads sit behind `<Suspense>`, and no task data is cached.
+- **Account creation verifies the email before any password exists.** `/signup` calls `signInWithOtp` (creating the user with `needs_password: true` in their metadata), the emailed link lands on `/auth/confirm`, which exchanges it for a session, and the proxy keeps that user on `/set-password` until they save a password. They are then signed out and sign in with the new password. Signing up with an email that already has an account gives the same response (no account enumeration); its link simply signs the user in.
+- **Email templates** (`supabase/templates/`) link to `/auth/confirm?token_hash=…`, so the link works even when opened in a different browser. The hosted project's default templates send a PKCE `?code=` link instead, which `/auth/confirm` also accepts but only in the browser that asked for it. For production, copy the templates into the dashboard (Authentication → Email Templates: Magic Link and Confirm signup) and add `https://<your-domain>/auth/confirm` to the redirect URLs.
 - **The rejects file is built in the browser** from the import result, so nothing is stored on the server.
 
 ## Known limitations
