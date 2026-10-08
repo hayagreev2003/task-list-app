@@ -1,0 +1,12 @@
+title,due_date,priority,notes
+"Buy milk, eggs",2026-11-02,2,"From the corner shop, not the supermarket"
+Call the plumber,2026-11-03,1,Kitchen tap is leaking
+"  BUY MILK, EGGS ",2026-11-02,4,Same task as row 2 with different case and spacing
+,,,
+Prepare slides,2026-11-05,high,Priority is a word not a number
+"Draft the quarterly planning memo covering budget, hiring, travel and risks Draft the quarterly planning memo covering budget, hiring, travel and risks Draft the quarterly planning memo covering budget",2026-11-06,3,Title is 201 characters long
+Renew passport,05/01/2026,2,Date is not in YYYY-MM-DD format
+Pay rent,2026-02-30,1,February 30th does not exist
+"Write ""Q4"" report",2026-11-10,3,"Notes with a line break
+second line"
+Team lunch,2026-11-12,5,
