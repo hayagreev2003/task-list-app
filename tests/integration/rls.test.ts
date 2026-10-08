@@ -112,7 +112,7 @@ describe("row-level security on tasks", () => {
       rows: [{ row_number: 2, title: aliceTask.title, due_date: aliceTask.due_date, priority: 1, notes: null }],
     });
     expect(error).toBeNull();
-    expect(data).toEqual({ inserted: 1, skipped_row_numbers: [] });
+    expect(data).toEqual({ inserted: 1, skipped_row_numbers: [], duplicates: [] });
   });
 
   it("signed-out callers can't run import_tasks", async () => {

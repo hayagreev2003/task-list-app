@@ -5,7 +5,7 @@ import { TaskItem } from "./TaskItem";
 
 export async function TaskList({ filters }: { filters: TaskFilters }) {
   const { supabase } = await requireUser();
-  const tasks = await listTasks(supabase, filters);
+  const { tasks, truncated } = await listTasks(supabase, filters);
 
   if (tasks.length === 0) {
     // Tell "nothing matches" apart from "nothing at all".
@@ -28,7 +28,7 @@ export async function TaskList({ filters }: { filters: TaskFilters }) {
   return (
     <>
       <p className="muted">
-        {tasks.length === LIST_LIMIT ? `Showing the first ${LIST_LIMIT} tasks.` : `${tasks.length} task${tasks.length === 1 ? "" : "s"}`}
+        {truncated ? `Showing the first ${LIST_LIMIT} tasks.` : `${tasks.length} task${tasks.length === 1 ? "" : "s"}`}
       </p>
       <ul className="tasks">
         {tasks.map((task) => (

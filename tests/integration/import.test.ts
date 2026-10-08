@@ -110,6 +110,33 @@ describe("CSV import against the database", () => {
       ],
     });
     expect(error).toBeNull();
-    expect(data).toEqual({ inserted: 1, skipped_row_numbers: [3] });
+    expect(data).toEqual({
+      inserted: 1,
+      skipped_row_numbers: [3],
+      duplicates: [{ row_number: 3, first_row_number: 2 }],
+    });
+  });
+
+  it("tells in-file duplicates apart from existing tasks when both occur", async () => {
+    await user.client.from("tasks").insert({ title: "Old", due_date: "2026-01-05", priority: 1 });
+
+    const result = await runImport(
+      user.client,
+      "title,due_date,priority\nOld,2026-01-05,2\nNew,2026-01-05,3\nOLD,2026-01-05,4\nnew,2026-01-05,5\n",
+    );
+    if (!result.ok) throw new Error(result.error);
+
+    expect(result.imported).toBe(1);
+    expect(result.rejected.map((r) => [r.rowNumber, r.reasons])).toEqual([
+      [2, [ALREADY_EXISTS]],
+      [4, ["duplicate of row 2"]],
+      [5, ["duplicate of row 3"]],
+    ]);
+  });
+
+  it("re-imports a corrected rejects file without the formula-guard apostrophe", async () => {
+    const result = await runImport(user.client, "title,due_date,priority\n'-Call bank,2026-01-05,2\n");
+    expect(result).toMatchObject({ ok: true, imported: 1 });
+    expect(await liveTitles()).toEqual(["-Call bank"]);
   });
 });

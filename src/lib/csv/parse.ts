@@ -3,6 +3,14 @@ import { KNOWN_COLUMNS, REQUIRED_COLUMNS, type CsvColumn, type ParseResult, type
 
 const BOM = "﻿";
 
+/**
+ * Undoes the ' that the rejects export puts before = + - @ (see rejects.ts), so a corrected
+ * rejects file imports with the original values.
+ */
+function unescapeFormula(cell: string): string {
+  return /^'[=+\-@\t\r]/.test(cell) ? cell.slice(1) : cell;
+}
+
 function isBlank(cells: string[]): boolean {
   return cells.every((cell) => cell.trim() === "");
 }
@@ -18,7 +26,13 @@ export function parseCsv(input: string): ParseResult {
   const text = withoutBom.replace(/\r\n?/g, "\n");
   if (text.trim() === "") return { ok: false, error: "The file is empty." };
 
-  const parsed = Papa.parse<string[]>(text, { header: false, skipEmptyLines: false, newline: "\n" });
+  const parsed = Papa.parse<string[]>(text, {
+    header: false,
+    skipEmptyLines: false,
+    newline: "\n",
+    // Don't let Papa guess from a preview: the file must be comma-separated.
+    delimiter: ",",
+  });
 
   const quoteError = parsed.errors.find((e) => e.type === "Quotes");
   if (quoteError) {
@@ -63,7 +77,7 @@ export function parseCsv(input: string): ParseResult {
     }
     const cellAt = (column: CsvColumn) => {
       const index = columnIndex.get(column);
-      return index === undefined ? "" : (cells[index] ?? "");
+      return index === undefined ? "" : unescapeFormula(cells[index] ?? "");
     };
     rows.push({
       rowNumber: i + 1,

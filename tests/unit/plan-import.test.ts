@@ -29,15 +29,13 @@ describe("planImport", () => {
     ]);
   });
 
-  it("rejects later in-file duplicates with the first row number", () => {
+  it("leaves in-file duplicates for the database to judge", () => {
     const result = planImport(
       "title,due_date,priority\nBuy milk,2026-01-05,3\n  BUY MILK ,2026-01-05,1\n",
     );
     if (!result.ok) throw new Error(result.error);
-    expect(result.plan.candidates.map((c) => c.rowNumber)).toEqual([2]);
-    expect(result.plan.rejected).toEqual([
-      { rowNumber: 3, cells: ["  BUY MILK ", "2026-01-05", "1"], reasons: ["duplicate of row 2"] },
-    ]);
+    expect(result.plan.candidates.map((c) => c.rowNumber)).toEqual([2, 3]);
+    expect(result.plan.rejected).toEqual([]);
   });
 
   it("doesn't let an invalid row claim a duplicate key", () => {

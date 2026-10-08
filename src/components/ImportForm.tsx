@@ -85,7 +85,8 @@ function RejectedTable({
     link.href = url;
     link.download = `${(fileName ?? "import").replace(/\.csv$/i, "")}-rejected.csv`;
     link.click();
-    URL.revokeObjectURL(url);
+    // Revoking straight away can cancel the download in Safari and some Firefox setups.
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
   }
 
   return (
@@ -107,14 +108,16 @@ function RejectedTable({
         <tbody>
           {rejected.map((row) => {
             const title = titleIndex === -1 ? "" : (row.cells[titleIndex] ?? "").trim();
+            // Count code points, as validation does, so an emoji is never cut in half.
+            const chars = Array.from(title);
             return (
               <tr key={row.rowNumber}>
                 <td>{row.rowNumber}</td>
                 <td title={title}>
                   {title === "" ? (
                     <span className="muted">(empty)</span>
-                  ) : title.length > PREVIEW_LENGTH ? (
-                    `${title.slice(0, PREVIEW_LENGTH)}…`
+                  ) : chars.length > PREVIEW_LENGTH ? (
+                    `${chars.slice(0, PREVIEW_LENGTH).join("")}…`
                   ) : (
                     title
                   )}

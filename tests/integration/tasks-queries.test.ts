@@ -13,6 +13,7 @@ describe("listTasks", () => {
       { title: "Discount 50% off", due_date: "2026-01-05", priority: 4, status: "done" },
       { title: "Read (chapter 3)", due_date: "2026-01-05", priority: 1, notes: 'quote "x" \\ slash' },
       { title: "snake_case rename", due_date: "2026-01-07", priority: 3 },
+      { title: "Glob *.csv [a-z]+ files?", due_date: "2026-01-08", priority: 3, notes: "^start | end$" },
       { title: "Deleted task", due_date: "2026-01-05", priority: 1 },
     ], { defaultToNull: false });
     if (error) throw error;
@@ -22,7 +23,7 @@ describe("listTasks", () => {
   afterAll(deleteTestUsers);
 
   const titles = async (params: Record<string, string>) =>
-    (await listTasks(user.client, parseFilters(params))).map((t) => t.title);
+    (await listTasks(user.client, parseFilters(params))).tasks.map((t) => t.title);
 
   it("lists live tasks ordered by due date then priority", async () => {
     expect(await titles({})).toEqual([
@@ -30,6 +31,7 @@ describe("listTasks", () => {
       "Discount 50% off",
       "Buy milk, eggs",
       "snake_case rename",
+      "Glob *.csv [a-z]+ files?",
     ]);
   });
 
@@ -46,6 +48,13 @@ describe("listTasks", () => {
     ["_", ["snake_case rename"]],
     ['"x"', ["Read (chapter 3)"]],
     ["\\", ["Read (chapter 3)"]],
+    ["*", ["Glob *.csv [a-z]+ files?"]],
+    ["*.csv", ["Glob *.csv [a-z]+ files?"]],
+    ["u*m", []],
+    [".", ["Glob *.csv [a-z]+ files?"]],
+    ["[a-z]+", ["Glob *.csv [a-z]+ files?"]],
+    ["files?", ["Glob *.csv [a-z]+ files?"]],
+    ["^start | end$", ["Glob *.csv [a-z]+ files?"]],
   ])("treats special characters in %j literally", async (q, expected) => {
     expect(await titles({ q })).toEqual(expected);
   });

@@ -30,7 +30,7 @@ A small task-list web app where each signed-in user manages their own tasks and 
   - the priority is missing or not a whole number from 1 to 5 (e.g. `high`, `2.5`, `0`)
 - **Duplicates are detected** within the file and against your existing tasks. A duplicate is the same title (ignoring case and surrounding spaces) with the same due date. The first occurrence in a file is kept, and deleted tasks don't count.
 - **Valid rows are imported in a single transaction.** Either all of them are saved or none are.
-- **Rejected rows are listed** with their spreadsheet row number and every reason they failed, and can be **downloaded as a CSV** to fix and re-upload.
+- **Rejected rows are listed** with their spreadsheet row number and every reason they failed, and can be **downloaded as a CSV** to fix and re-upload. The file must be comma-separated and named `.csv`.
 - Robust to messy files: quoted fields containing commas, quotes or line breaks, Windows (CRLF) line endings, a UTF-8 byte-order mark, and blank rows. Blank rows are skipped and counted, not treated as errors.
 - Oversized, empty or malformed files produce a clear message, never a crash.
 
@@ -82,12 +82,12 @@ Local Supabase must be running (`npm run db:start`) with `.env.local` filled in.
 | File | Covers |
 | --- | --- |
 | `tests/unit/validation.test.ts` | Title, `YYYY-MM-DD` date (format and real-calendar checks, leap years) and priority rules; all reasons reported together |
-| `tests/unit/csv-parse.test.ts` | Quoted commas, escaped quotes, quoted newlines, CRLF/LF/mixed endings, BOM, blank rows, header order/case, missing columns, unclosed quotes, row numbering |
-| `tests/unit/dedupe.test.ts`, `plan-import.test.ts` | In-file duplicates (first wins), invalid rows excluded from dedupe, 5,000-row limit |
-| `tests/unit/rejects.test.ts` | Rejects CSV escaping and round-trip through the parser |
+| `tests/unit/csv-parse.test.ts` | Quoted commas, escaped quotes, quoted newlines, CRLF/LF/mixed endings, BOM, blank rows, header order/case, missing columns, unclosed quotes, row numbering, comma-only delimiter |
+| `tests/unit/plan-import.test.ts` | Valid/invalid split, every reason kept, 5,000-row limit |
+| `tests/unit/rejects.test.ts` | Rejects CSV escaping, round-trip through the parser, formula guard removed on re-import |
 | `tests/integration/rls.test.ts` | Cross-user isolation through the database API: user B can't list, read, update, soft-delete, insert as, or reassign user A's tasks; signed-out access; no hard delete |
-| `tests/integration/import.test.ts` | The edge-case file end to end, duplicates against existing tasks, soft-deleted tasks, re-import, all-or-nothing transaction |
-| `tests/integration/tasks-queries.test.ts` | Search (including `%`, `_`, commas, quotes, brackets taken literally) and combined filters |
+| `tests/integration/import.test.ts` | The edge-case file end to end, in-file duplicates (first wins) vs duplicates of existing tasks, soft-deleted tasks, re-import, all-or-nothing transaction |
+| `tests/integration/tasks-queries.test.ts` | Search (including `%`, `_`, `*`, regex characters, commas, quotes, brackets taken literally) and combined filters |
 
 **How the isolation test was validated:** with RLS switched off on `public.tasks` (`alter table public.tasks disable row level security;`), four tests in `rls.test.ts` fail (list, read by id, update, soft delete). Re-enabling RLS makes them pass again.
 
@@ -115,9 +115,9 @@ Local Supabase must be running (`npm run db:start`) with `.env.local` filled in.
 
 - **Isolation is enforced by Postgres.** The app only talks to Supabase as the signed-in user (publishable key plus session cookies). RLS policies check `user_id = auth.uid()`. Column-level grants stop clients writing `user_id`, `id` or timestamps, and there is no `DELETE` grant, so tasks can only be soft-deleted. The secret key is used only by the test helper that creates test users.
 - **Duplicates are guaranteed by the database as well as the app:** a partial unique index on `(user_id, lower(title), due_date) where deleted_at is null`. Titles are stored trimmed.
-- **Import = pure TypeScript core + one Postgres function.** Parsing (papaparse plus our own BOM, blank-row and row-number handling), validation and in-file dedupe are pure and unit-tested. The `import_tasks` function (`SECURITY INVOKER`, so RLS applies) inserts every valid row in one statement with `on conflict do nothing` and returns the rows that clashed with existing tasks. One call is one transaction: any failure means nothing is saved.
+- **Import = pure TypeScript core + one Postgres function.** Parsing (papaparse plus our own BOM, blank-row and row-number handling) and validation are pure and unit-tested. The `import_tasks` function (`SECURITY INVOKER`, so RLS applies) inserts every valid row in one statement with `on conflict do nothing` and returns which rows repeated an earlier row in the file and which clashed with existing tasks. Postgres's `lower()` is the only definition of "same title", so the app and the database can't disagree about duplicates. One call is one transaction: any failure means nothing is saved.
 - **One set of validation rules** (`src/lib/tasks/validation.ts`) serves both the form and the import. The form uses `<input type="date">`, which always submits `YYYY-MM-DD`.
-- **Next.js 16:** `src/proxy.ts` (formerly middleware) refreshes the session and redirects signed-out users, but it is only an optimistic check. `requireUser()` runs in every Server Action and data read. Cache Components stays on: session reads sit behind `<Suspense>`, and no task data is cached.
+- **Next.js 16:** `src/proxy.ts` (formerly middleware) refreshes the session and redirects signed-out users, but it is only an optimistic check. Before sending a signed-in user away from `/login` it confirms the session with the auth server, so a revoked session can't loop between `/login` and `/tasks`. `requireUser()` runs in every Server Action and data read. Cache Components stays on: session reads sit behind `<Suspense>`, and no task data is cached.
 - **The rejects file is built in the browser** from the import result, so nothing is stored on the server.
 
 ## Known limitations
@@ -125,10 +125,8 @@ Local Supabase must be running (`npm run db:start`) with `.env.local` filled in.
 - Duplicate matching ignores case and surrounding spaces only. Internal spacing (`Buy  milk` vs `Buy milk`) counts as different.
 - The list shows at most 500 tasks (no pagination).
 - Imports are synchronous and capped at 1 MB / 5,000 rows.
-- In the rejects download, cells starting with `=`, `+`, `-` or `@` get a leading `'` so spreadsheets don't run them as formulae. Re-uploading that file without removing the `'` keeps it in the value.
-- Duplicate matching lower-cases titles in TypeScript and in Postgres. For rare Unicode characters where the two disagree, a duplicate inside one file can be reported as "already exists in your tasks" instead of "duplicate of row N". The counts stay correct.
+- In the rejects download, cells starting with `=`, `+`, `-` or `@` get a leading `'` so spreadsheets don't run them as formulae. The importer strips a `'` before those characters, so a value that really starts with `'=` loses the `'`.
 - There is no per-user cap on the number of tasks.
-- In search, `*` behaves as a wildcard (PostgREST treats it like `%`).
 
 ## What I'd do next
 

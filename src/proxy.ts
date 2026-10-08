@@ -33,7 +33,16 @@ export async function proxy(request: NextRequest) {
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
   if (!signedIn && !isPublic) return redirectKeepingCookies(request, response, "/login");
-  if (signedIn && isPublic) return redirectKeepingCookies(request, response, "/tasks");
+
+  if (signedIn && isPublic) {
+    // getClaims only checks the JWT locally, so a revoked session still looks signed in until
+    // the token expires. requireUser() asks the auth server and would send /tasks straight back
+    // here, looping. Confirm with the auth server before leaving /login (only /login pays this),
+    // and clear the stale session if it fails.
+    const { data: userData, error } = await supabase.auth.getUser();
+    if (!error && userData.user) return redirectKeepingCookies(request, response, "/tasks");
+    await supabase.auth.signOut({ scope: "local" });
+  }
   return response;
 }
 

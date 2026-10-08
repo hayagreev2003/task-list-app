@@ -44,4 +44,10 @@ describe("buildRejectsCsv", () => {
     if (!parsed.ok) throw new Error(parsed.error);
     expect(parsed.rows[0].cells.slice(1, 5)).toEqual(["'=HYPERLINK(\"http://x\")", "'+1", "'-2", "'@SUM(A1)"]);
   });
+
+  it("gives back the original values when the rejects file is parsed for re-import", () => {
+    const parsed = parseCsv(buildRejectsCsv(headers, [{ rowNumber: 2, cells: ["-Call bank", "=1", "+2", "@x"], reasons: ["x"] }]));
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(parsed.rows[0].fields).toEqual({ title: "-Call bank", due_date: "=1", priority: "+2", notes: "@x" });
+  });
 });

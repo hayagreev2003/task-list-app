@@ -112,4 +112,24 @@ describe("parseCsv", () => {
     expect(result.ok).toBe(false);
     expect(!result.ok && result.error).toMatch(/quote/i);
   });
+
+  it("always splits on commas, even when another character looks more regular", () => {
+    const result = ok(
+      ["title,due_date,priority,notes", "A,2026-01-05,3", "B,2026-01-06,2,x;y;z", "C,2026-01-07,1,p;q;r"].join("\n"),
+    );
+    expect(result.rows.map((r) => r.fields.title)).toEqual(["A", "B", "C"]);
+    expect(result.rows[1].fields.notes).toBe("x;y;z");
+  });
+
+  it("does not accept a semicolon-separated file as CSV", () => {
+    const result = parseCsv("title;due_date;priority\nA;2026-01-05;3");
+    expect(!result.ok && result.error).toMatch(/Missing required columns/);
+  });
+
+  it("drops the formula-guard apostrophe only before = + - @", () => {
+    const result = ok("title,due_date,priority,notes\n'=SUM(A1),2026-01-05,3,'quoted'");
+    expect(result.rows[0].fields.title).toBe("=SUM(A1)");
+    expect(result.rows[0].fields.notes).toBe("'quoted'");
+    expect(result.rows[0].cells[0]).toBe("'=SUM(A1)");
+  });
 });

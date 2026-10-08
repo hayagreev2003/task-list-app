@@ -31,19 +31,27 @@ export const hasActiveFilters = (f: TaskFilters) => Boolean(f.q || f.status || f
 
 /**
  * Builds a PostgREST `or` filter for a case-insensitive substring match on title and notes.
- * LIKE wildcards in the search text are escaped so they match literally, and the value is
- * double-quoted so commas and parentheses can't break out of the filter syntax.
+ * Uses `imatch` (Postgres `~*`) rather than `ilike`, because PostgREST turns every `*` in an
+ * `ilike` value into `%` and offers no way to escape it. Regex metacharacters in the search text
+ * are escaped so they match literally, and the value is double-quoted so commas and parentheses
+ * can't break out of the filter syntax.
  */
 export function searchFilter(q: string): string {
-  const likeEscaped = q.replace(/[\\%_]/g, (c) => `\\${c}`);
-  const quoted = `"${`%${likeEscaped}%`.replace(/[\\"]/g, (c) => `\\${c}`)}"`;
-  return `title.ilike.${quoted},notes.ilike.${quoted}`;
+  const regexEscaped = q.replace(/[\\^$.*+?()[\]{}|]/g, (c) => `\\${c}`);
+  const quoted = `"${regexEscaped.replace(/[\\"]/g, (c) => `\\${c}`)}"`;
+  return `title.imatch.${quoted},notes.imatch.${quoted}`;
 }
 
 type Client = SupabaseClient<Database>;
 
-/** Live (not deleted) tasks for the signed-in user; RLS scopes rows to that user. */
-export async function listTasks(supabase: Client, filters: TaskFilters): Promise<Task[]> {
+/**
+ * Live (not deleted) tasks for the signed-in user, up to LIST_LIMIT; RLS scopes rows to that user.
+ * `truncated` is true only when more matching tasks exist.
+ */
+export async function listTasks(
+  supabase: Client,
+  filters: TaskFilters,
+): Promise<{ tasks: Task[]; truncated: boolean }> {
   let query = supabase
     .from("tasks")
     .select("id, title, notes, due_date, priority, status")
@@ -57,10 +65,11 @@ export async function listTasks(supabase: Client, filters: TaskFilters): Promise
     .order("due_date", { ascending: true })
     .order("priority", { ascending: true })
     .order("created_at", { ascending: true })
-    .limit(LIST_LIMIT);
+    // One extra row tells "exactly LIST_LIMIT" apart from "more than LIST_LIMIT".
+    .limit(LIST_LIMIT + 1);
 
   if (error) throw new Error(`Could not load tasks: ${error.message}`);
-  return data;
+  return { tasks: data.slice(0, LIST_LIMIT), truncated: data.length > LIST_LIMIT };
 }
 
 export async function countLiveTasks(supabase: Client): Promise<number> {
