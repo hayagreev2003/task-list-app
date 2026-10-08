@@ -28,7 +28,11 @@ Take-home exercise, time-boxed to about 3 hours. A signed-in user manages their 
 - R9. Expected columns are `title, due_date, priority, notes`. A header row is required. Header names are case-insensitive and can come in any order. Unknown columns are ignored. If a required column is missing, the whole file is rejected with a clear message.
 - R10. The parser handles quoted fields that contain commas, quotes or newlines, CRLF and LF line endings, and a UTF-8 BOM.
 - R11. Fully blank rows (including rows that are only commas) are skipped, not rejected. The summary shows how many were skipped.
-- R12. A row is invalid if: the title is missing or over 200 characters, the due_date is missing or not a real `YYYY-MM-DD` date (so 2026-02-30 is rejected), or the priority is missing or not a whole number 1–5 (so `high`, `2.5` and `0` are rejected). All reasons for a row are reported together.
+- R12. A row is invalid if: the title is missing or over 200 characters, the due_date is missing or invalid, or the priority is missing or not a whole number 1–5 (so `high`, `2.5` and `0` are rejected). All reasons for a row are reported together.
+  - The only accepted date format is `YYYY-MM-DD` (four-digit year, two-digit month, two-digit day), e.g. `2026-01-05`. Surrounding spaces are trimmed.
+  - Any other format is rejected, e.g. `05-01-2026`, `05/01/2026`, `2026/01/05`, `26-01-05`, `2026-1-5`.
+  - A date in the right format must also exist on the calendar: `2026-02-30` and `2025-02-29` are rejected, `2024-02-29` (leap year) is accepted.
+  - The rejection reason names the expected format, e.g. "due_date must be a real date in YYYY-MM-DD format".
 - R13. Duplicate = same title (trimmed, case-insensitive) and same due date as a task already in the account (not deleted) or an earlier row in the same file. The first occurrence in the file wins. Later copies are rejected with "duplicate of row N" or "already exists in your tasks".
 - R14. Validation happens on the server. All valid rows are inserted in one transaction: if the insert fails, nothing is imported and the user sees an error.
 - R15. The result screen shows how many rows were imported, rejected and blank-skipped, plus a table of rejected rows with row number and reason(s). Row numbers match what a spreadsheet shows (header = row 1).

@@ -177,7 +177,7 @@ sequenceDiagram
 - Test: `tests/unit/validation.test.ts`, `tests/unit/csv-parse.test.ts`, `tests/unit/dedupe.test.ts`, `tests/unit/rejects.test.ts`
 
 **Approach:**
-- `validateTaskInput` returns normalised values or a list of reasons (all reasons, not first-fail). The date check is a strict `YYYY-MM-DD` regex plus a real-calendar check (round-trip through UTC date parts). The priority check is a strict integer regex `^[1-5]$` after trim.
+- `validateTaskInput` returns normalised values or a list of reasons (all reasons, not first-fail). The date check (R12) accepts only `YYYY-MM-DD`: trim, match `^\d{4}-\d{2}-\d{2}$`, then a real-calendar check (round-trip through UTC date parts). Any failure gives one reason that names the format: "due_date must be a real date in YYYY-MM-DD format". The value stored is the trimmed string, passed to Postgres as a `date`. The priority check is a strict integer regex `^[1-5]$` after trim.
 - The parse layer handles BOM strip, case-insensitive header mapping, missing-required-column → file-level error, blank detection (all cells empty after trim), and row numbers.
 - The dedupe key is lower(trim(title)) + due_date. The first occurrence wins, and later ones get "Duplicate of row N".
 
@@ -185,7 +185,10 @@ sequenceDiagram
 
 **Test scenarios:**
 - Title: missing, whitespace-only, exactly 200 (ok), 201 (rejected), trimmed before measuring.
-- Date: `2026-02-30`, `2026-13-01`, `26-01-01`, `2026/01/01`, ` 2026-01-05 ` (trim ok), empty (required), 2024-02-29 ok, 2025-02-29 rejected.
+- Date accepted: `2026-01-05`, ` 2026-01-05 ` (trimmed), `2024-02-29` (leap year).
+- Date rejected, wrong format: `05-01-2026`, `05/01/2026`, `2026/01/05`, `26-01-05`, `2026-1-5`, `2026-01-05T00:00`.
+- Date rejected, not on the calendar: `2026-02-30`, `2025-02-29`, `2026-13-01`, `2026-00-10`.
+- Date empty → "due_date is required". Each rejection's reason names the YYYY-MM-DD format.
 - Priority: `high`, `2.5`, `0`, `6`, `-1`, `01` (rejected: strict single digit), `3.0` (rejected), empty (required), ` 3 ` ok.
 - Multiple failures on one row → all reasons listed.
 - Parse: quoted comma `"Buy milk, eggs"` stays one field; escaped quotes; quoted newline; CRLF file; BOM file; trailing newline doesn't add a row; `,,,` and empty lines counted as blank and skipped but still advance row numbers; header in different order/case; missing `priority` header → file error; extra column ignored.
@@ -209,6 +212,7 @@ sequenceDiagram
 **Approach:**
 - The list is a server component reading `searchParams` (q, status, priority) inside Suspense. The query always filters `deleted_at is null` and orders by due date then priority.
 - Actions: create, update, toggle complete, soft delete (set `deleted_at`). All go through `validateTaskInput`, then `revalidatePath`. Unique-index violation on create/edit → friendly "A task with this title and due date already exists".
+- The form's due date uses `<input type="date">`, which submits `YYYY-MM-DD` whatever the browser's display locale, so form and CSV share the same R12 date rule.
 - Empty states: no tasks at all (CTA: add or import) vs no results for the filters (clear filters link). Error: `error.tsx` with retry, plus an inline action error for form failures.
 - Delete asks for confirmation through an inline UI pattern, not `window.confirm`.
 
@@ -291,7 +295,7 @@ sequenceDiagram
 
 **Approach:**
 - The README covers prerequisites (Node 20, Docker), setup (`npm i`, `npx supabase start`, copy keys into `.env.local`, `npm run dev`), tests, design decisions (brief), known limitations, what I'd do next, and the recording link.
-- `edge-case.csv` contains: a valid row with a quoted comma, a duplicate of it, an empty row, priority `high`, a 201-character title, a CRLF line ending, and an invalid date.
+- `edge-case.csv` contains: a valid row with a quoted comma, a duplicate of it, an empty row, priority `high`, a 201-character title, a CRLF line ending, a wrong-format date (`05/01/2026`) and an impossible date (`2026-02-30`).
 - ai-log: export the Claude Code session JSONL transcripts unedited (see the risk below).
 
 **Verification:** A fresh clone, following only the README, reaches a working app and a green `npm test`.
