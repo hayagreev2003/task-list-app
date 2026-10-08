@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
-import { isTaskStatus, type TaskStatus } from "./validation";
+import { isTaskStatus, TASK_STATUSES, type TaskStatus } from "./validation";
 
 export const LIST_LIMIT = 500;
 
@@ -79,4 +79,29 @@ export async function countLiveTasks(supabase: Client): Promise<number> {
     .is("deleted_at", null);
   if (error) throw new Error(`Could not count tasks: ${error.message}`);
   return count ?? 0;
+}
+
+export type StatusCounts = Record<TaskStatus, number> & { all: number };
+
+/**
+ * Live task counts per status, honouring the search and priority filters but not the status
+ * filter, so each status tab shows how many tasks selecting it would list.
+ */
+export async function countTasksByStatus(supabase: Client, filters: TaskFilters): Promise<StatusCounts> {
+  const results = await Promise.all(
+    TASK_STATUSES.map(async (status) => {
+      let query = supabase
+        .from("tasks")
+        .select("id", { count: "exact", head: true })
+        .is("deleted_at", null)
+        .eq("status", status);
+      if (filters.priority) query = query.eq("priority", filters.priority);
+      if (filters.q) query = query.or(searchFilter(filters.q));
+      const { count, error } = await query;
+      if (error) throw new Error(`Could not count tasks: ${error.message}`);
+      return [status, count ?? 0] as const;
+    }),
+  );
+  const counts = Object.fromEntries(results) as Record<TaskStatus, number>;
+  return { ...counts, all: results.reduce((sum, [, n]) => sum + n, 0) };
 }
