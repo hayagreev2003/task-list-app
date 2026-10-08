@@ -35,4 +35,13 @@ describe("buildRejectsCsv", () => {
     const csv = buildRejectsCsv(headers, [{ rowNumber: 2, cells: ["A"], reasons: ["x"] }]);
     expect(csv.split("\r\n")[1]).toBe("2,A,,,,x");
   });
+
+  it("neutralises cells that a spreadsheet would run as formulae", () => {
+    const csv = buildRejectsCsv(headers, [
+      { rowNumber: 2, cells: ['=HYPERLINK("http://x")', "+1", "-2", "@SUM(A1)"], reasons: ["x"] },
+    ]);
+    const parsed = parseCsv(csv);
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(parsed.rows[0].cells.slice(1, 5)).toEqual(["'=HYPERLINK(\"http://x\")", "'+1", "'-2", "'@SUM(A1)"]);
+  });
 });

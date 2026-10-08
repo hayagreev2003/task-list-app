@@ -20,7 +20,8 @@ export async function authenticate(_prev: AuthFormState, formData: FormData): Pr
   } else {
     if (password.length < 8) return { error: "Use a password of at least 8 characters.", email };
     const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) return { error: error.message, email };
+    // Generic on purpose: don't reveal whether an email already has an account.
+    if (error) return { error: "Couldn't create an account with these details. If you already have one, sign in.", email };
     if (!data.session) return { message: "Check your email to confirm your account, then sign in.", email };
   }
 

@@ -13,7 +13,7 @@ A small task-list web app where each signed-in user manages their own tasks and 
 - Every user sees **only their own tasks**. This is enforced in the database with row-level security, not only in application code, so a bug in the UI or API can't leak another user's data.
 
 ### Tasks
-- Each task has a **title** (required, up to 200 characters), **notes**, **due date**, **priority** (1–5) and **status** (to do, in progress, done).
+- Each task has a **title** (required, up to 200 characters), **notes** (up to 2,000 characters), **due date**, **priority** (1–5) and **status** (to do, in progress, done).
 - Create, edit, mark complete (and reopen), and delete tasks.
 - Deleting is a **soft delete**: the task disappears from your list but is kept in the database.
 
@@ -125,7 +125,9 @@ Local Supabase must be running (`npm run db:start`) with `.env.local` filled in.
 - Duplicate matching ignores case and surrounding spaces only. Internal spacing (`Buy  milk` vs `Buy milk`) counts as different.
 - The list shows at most 500 tasks (no pagination).
 - Imports are synchronous and capped at 1 MB / 5,000 rows.
-- Cells in the rejects download are written as-is. Spreadsheet apps may treat a value starting with `=`, `+`, `-` or `@` as a formula. The values come from the user's own file.
+- In the rejects download, cells starting with `=`, `+`, `-` or `@` get a leading `'` so spreadsheets don't run them as formulae. Re-uploading that file without removing the `'` keeps it in the value.
+- Duplicate matching lower-cases titles in TypeScript and in Postgres. For rare Unicode characters where the two disagree, a duplicate inside one file can be reported as "already exists in your tasks" instead of "duplicate of row N". The counts stay correct.
+- There is no per-user cap on the number of tasks.
 - In search, `*` behaves as a wildcard (PostgREST treats it like `%`).
 
 ## What I'd do next

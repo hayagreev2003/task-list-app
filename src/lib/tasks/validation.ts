@@ -1,6 +1,7 @@
 // Single source of truth for task field rules, shared by the task form and CSV import (R6).
 
 export const TITLE_MAX_LENGTH = 200;
+export const NOTES_MAX_LENGTH = 2000;
 export const TASK_STATUSES = ["todo", "in_progress", "done"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
@@ -35,6 +36,7 @@ export const MESSAGES = {
   dueDateInvalid: "due_date must be a real date in YYYY-MM-DD format",
   priorityRequired: "priority is required",
   priorityInvalid: "priority must be a whole number from 1 to 5",
+  notesTooLong: `notes must be ${NOTES_MAX_LENGTH} characters or fewer`,
 } as const;
 
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -78,9 +80,11 @@ export function validateTaskInput(raw: RawTaskInput): ValidationResult {
   if (priorityText === "") errors.push(MESSAGES.priorityRequired);
   else if (!PRIORITY_PATTERN.test(priorityText)) errors.push(MESSAGES.priorityInvalid);
 
+  const notes = asTrimmedString(raw.notes);
+  if ([...notes].length > NOTES_MAX_LENGTH) errors.push(MESSAGES.notesTooLong);
+
   if (errors.length > 0) return { ok: false, errors };
 
-  const notes = asTrimmedString(raw.notes);
   return {
     ok: true,
     value: {

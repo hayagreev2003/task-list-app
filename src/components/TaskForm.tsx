@@ -3,7 +3,7 @@
 import { useActionState, useId } from "react";
 import type { TaskFormState } from "@/app/tasks/actions";
 import type { Task } from "@/lib/tasks/queries";
-import { STATUS_LABELS, TASK_STATUSES, TITLE_MAX_LENGTH } from "@/lib/tasks/validation";
+import { NOTES_MAX_LENGTH, STATUS_LABELS, TASK_STATUSES, TITLE_MAX_LENGTH } from "@/lib/tasks/validation";
 
 type Props = {
   action: (prev: TaskFormState, formData: FormData) => Promise<TaskFormState>;
@@ -53,7 +53,7 @@ export function TaskForm({ action, task, submitLabel, onCancel }: Props) {
       </label>
       <label className="full">
         Notes
-        <textarea name="notes" rows={2} defaultValue={value("notes")} />
+        <textarea name="notes" rows={2} maxLength={NOTES_MAX_LENGTH} defaultValue={value("notes")} />
       </label>
       {state.errors ? (
         <ul id={`${id}-errors`} role="alert" className="error full">

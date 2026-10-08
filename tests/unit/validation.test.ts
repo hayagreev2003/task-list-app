@@ -99,6 +99,16 @@ describe("validateTaskInput", () => {
     });
   });
 
+  describe("notes", () => {
+    it("accepts 2,000 characters", () => {
+      expect(errorsFor({ notes: "n".repeat(2000) })).toEqual([]);
+    });
+
+    it("rejects more than 2,000 characters", () => {
+      expect(errorsFor({ notes: "n".repeat(2001) })).toEqual(["notes must be 2000 characters or fewer"]);
+    });
+  });
+
   it("reports every failing field together", () => {
     expect(errorsFor({ title: "", due_date: "2026-02-30", priority: "high" })).toEqual([
       "title is required",

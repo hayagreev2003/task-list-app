@@ -94,6 +94,14 @@ describe("CSV import against the database", () => {
     expect(await liveTitles()).toEqual([]);
   });
 
+  it("rejects over-long notes at the database even when app validation is bypassed", async () => {
+    const { error } = await user.client.rpc("import_tasks", {
+      rows: [{ row_number: 2, title: "Long notes", due_date: "2026-01-05", priority: 3, notes: "n".repeat(2001) }],
+    });
+    expect(error).not.toBeNull();
+    expect(await liveTitles()).toEqual([]);
+  });
+
   it("skips duplicates within one RPC batch, keeping the first", async () => {
     const { data, error } = await user.client.rpc("import_tasks", {
       rows: [
