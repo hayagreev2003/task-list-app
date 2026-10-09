@@ -1,0 +1,733 @@
+=== src/lib/csv/dedupe.ts
+ 1 │ /**
+ 2 │  * Duplicate key: title trimmed and lower-cased, plus due date.
+ 3 │  * Mirrors the database's unique index on (user_id, lower(title), due_date).
+ 4 │  */
+ 5 │ export function dedupeKey(title: string, dueDate: string): string {
+ 6 │   return `${title.trim().toLowerCase()}\u0000${dueDate}`;
+ 7 │ }
+ 8 │ 
+ 9 │ type Dedupable = { rowNumber: number; task: { title: string; due_date: string } };
+10 │ 
+11 │ /** Splits rows into first occurrences and later copies (each pointing at the first). */
+12 │ export function findInFileDuplicates<T extends Dedupable>(items: T[]) {
+13 │   const firstRowByKey = new Map<string, number>();
+14 │   const unique: T[] = [];
+15 │   const duplicates: { item: T; firstRowNumber: number }[] = [];
+16 │ 
+17 │   for (const item of items) {
+18 │     const key = dedupeKey(item.task.title, item.task.due_date);
+19 │     const firstRowNumber = firstRowByKey.get(key);
+20 │     if (firstRowNumber === undefined) {
+21 │       firstRowByKey.set(key, item.rowNumber);
+22 │       unique.push(item);
+23 │     } else {
+24 │       duplicates.push({ item, firstRowNumber });
+25 │     }
+26 │   }
+27 │ 
+28 │   return { unique, duplicates };
+29 │ }
+=== src/lib/csv/import.ts
+  1 │ import type { SupabaseClient } from "@supabase/supabase-js";
+  2 │ import { validateTaskInput, type TaskInput } from "@/lib/tasks/validation";
+  3 │ import { findInFileDuplicates } from "./dedupe";
+  4 │ import { parseCsv } from "./parse";
+  5 │ import type { RejectedRow } from "./types";
+  6 │ 
+  7 │ export const MAX_FILE_BYTES = 1024 * 1024;
+  8 │ export const MAX_DATA_ROWS = 5000;
+  9 │ 
+ 10 │ export const ALREADY_EXISTS = "already exists in your tasks";
+ 11 │ export const duplicateOfRow = (rowNumber: number) => `duplicate of row ${rowNumber}`;
+ 12 │ 
+ 13 │ export type ImportCandidate = { rowNumber: number; cells: string[]; task: TaskInput };
+ 14 │ 
+ 15 │ export type ImportPlan = {
+ 16 │   headers: string[];
+ 17 │   candidates: ImportCandidate[];
+ 18 │   rejected: RejectedRow[];
+ 19 │   blankSkipped: number;
+ 20 │ };
+ 21 │ 
+ 22 │ export type ImportResult =
+ 23 │   | {
+ 24 │       ok: true;
+ 25 │       imported: number;
+ 26 │       blankSkipped: number;
+ 27 │       headers: string[];
+ 28 │       rejected: RejectedRow[];
+ 29 │     }
+ 30 │   | { ok: false; error: string };
+ 31 │ 
+ 32 │ const byRowNumber = (a: { rowNumber: number }, b: { rowNumber: number }) => a.rowNumber - b.rowNumber;
+ 33 │ 
+ 34 │ /** Pure part of the import: parse, validate every row, and remove in-file duplicates. */
+ 35 │ export function planImport(text: string): { ok: true; plan: ImportPlan } | { ok: false; error: string } {
+ 36 │   const parsed = parseCsv(text);
+ 37 │   if (!parsed.ok) return parsed;
+ 38 │ 
+ 39 │   if (parsed.rows.length > MAX_DATA_ROWS) {
+ 40 │     return {
+ 41 │       ok: false,
+ 42 │       error: `The file has ${parsed.rows.length} rows. The limit is ${MAX_DATA_ROWS}.`,
+ 43 │     };
+ 44 │   }
+ 45 │ 
+ 46 │   const rejected: RejectedRow[] = [];
+ 47 │   const valid: ImportCandidate[] = [];
+ 48 │   for (const row of parsed.rows) {
+ 49 │     const result = validateTaskInput(row.fields);
+ 50 │     if (result.ok) valid.push({ rowNumber: row.rowNumber, cells: row.cells, task: result.value });
+ 51 │     else rejected.push({ rowNumber: row.rowNumber, cells: row.cells, reasons: result.errors });
+ 52 │   }
+ 53 │ 
+ 54 │   const { unique, duplicates } = findInFileDuplicates(valid);
+ 55 │   for (const { item, firstRowNumber } of duplicates) {
+ 56 │     rejected.push({ rowNumber: item.rowNumber, cells: item.cells, reasons: [duplicateOfRow(firstRowNumber)] });
+ 57 │   }
+ 58 │ 
+ 59 │   return {
+ 60 │     ok: true,
+ 61 │     plan: {
+ 62 │       headers: parsed.headers,
+ 63 │       candidates: unique,
+ 64 │       rejected: rejected.sort(byRowNumber),
+ 65 │       blankSkipped: parsed.blankSkipped,
+ 66 │     },
+ 67 │   };
+ 68 │ }
+ 69 │ 
+ 70 │ type ImportRpcResult = { inserted: number; skipped_row_numbers: number[] };
+ 71 │ 
+ 72 │ /**
+ 73 │  * Full import as the signed-in user: plan in TypeScript, then insert every valid row in one
+ 74 │  * database call (one transaction). Rows that clash with an existing live task come back as skipped.
+ 75 │  */
+ 76 │ export async function runImport(supabase: SupabaseClient, text: string): Promise<ImportResult> {
+ 77 │   const planned = planImport(text);
+ 78 │   if (!planned.ok) return planned;
+ 79 │   const { plan } = planned;
+ 80 │ 
+ 81 │   let imported = 0;
+ 82 │   const rejected = [...plan.rejected];
+ 83 │ 
+ 84 │   if (plan.candidates.length > 0) {
+ 85 │     const rows = plan.candidates.map((c) => ({ row_number: c.rowNumber, ...c.task }));
+ 86 │     const { data, error } = await supabase.rpc("import_tasks", { rows });
+ 87 │     if (error) {
+ 88 │       console.error("import_tasks failed", { code: error.code, message: error.message });
+ 89 │       return { ok: false, error: "The import failed and no rows were saved. Please try again." };
+ 90 │     }
+ 91 │     const result = data as ImportRpcResult;
+ 92 │     imported = result.inserted;
+ 93 │     const skipped = new Set(result.skipped_row_numbers);
+ 94 │     for (const candidate of plan.candidates) {
+ 95 │       if (skipped.has(candidate.rowNumber)) {
+ 96 │         rejected.push({ rowNumber: candidate.rowNumber, cells: candidate.cells, reasons: [ALREADY_EXISTS] });
+ 97 │       }
+ 98 │     }
+ 99 │   }
+100 │ 
+101 │   return {
+102 │     ok: true,
+103 │     imported,
+104 │     blankSkipped: plan.blankSkipped,
+105 │     headers: plan.headers,
+106 │     rejected: rejected.sort(byRowNumber),
+107 │   };
+108 │ }
+=== src/lib/csv/parse.ts
+ 1 │ import Papa from "papaparse";
+ 2 │ import { KNOWN_COLUMNS, REQUIRED_COLUMNS, type CsvColumn, type ParseResult, type ParsedRow } from "./types";
+ 3 │ 
+ 4 │ const BOM = "﻿";
+ 5 │ 
+ 6 │ function isBlank(cells: string[]): boolean {
+ 7 │   return cells.every((cell) => cell.trim() === "");
+ 8 │ }
+ 9 │ 
+10 │ /**
+11 │  * Parses CSV text into rows keyed by known column.
+12 │  * Row numbers count every record (blank ones included), so they match what a spreadsheet shows
+13 │  * even when a quoted cell spans several lines.
+14 │  */
+15 │ export function parseCsv(input: string): ParseResult {
+16 │   const withoutBom = input.startsWith(BOM) ? input.slice(BOM.length) : input;
+17 │   // Normalise line endings so files mixing CRLF and LF parse consistently.
+18 │   const text = withoutBom.replace(/\r\n?/g, "\n");
+19 │   if (text.trim() === "") return { ok: false, error: "The file is empty." };
+20 │ 
+21 │   const parsed = Papa.parse<string[]>(text, { header: false, skipEmptyLines: false, newline: "\n" });
+22 │ 
+23 │   const quoteError = parsed.errors.find((e) => e.type === "Quotes");
+24 │   if (quoteError) {
+25 │     const row = quoteError.row === undefined ? "" : ` near row ${quoteError.row + 1}`;
+26 │     return { ok: false, error: `The file has an unclosed quote${row}, so it can't be read reliably.` };
+27 │   }
+28 │ 
+29 │   const records = parsed.data;
+30 │   // A trailing newline yields one final empty record; it isn't a row.
+31 │   const last = records.at(-1);
+32 │   if (records.length > 1 && last && last.length === 1 && last[0] === "") records.pop();
+33 │ 
+34 │   // Skip any blank lines before the header.
+35 │   const headerIndex = records.findIndex((cells) => !isBlank(cells));
+36 │   if (headerIndex === -1) return { ok: false, error: "The file is empty." };
+37 │ 
+38 │   const headers = records[headerIndex].map((h) => h.trim());
+39 │   const columnIndex = new Map<CsvColumn, number>();
+40 │   headers.forEach((header, index) => {
+41 │     const key = header.toLowerCase() as CsvColumn;
+42 │     if ((KNOWN_COLUMNS as readonly string[]).includes(key) && !columnIndex.has(key)) {
+43 │       columnIndex.set(key, index);
+44 │     }
+45 │   });
+46 │ 
+47 │   const missing = REQUIRED_COLUMNS.filter((column) => !columnIndex.has(column));
+48 │   if (missing.length > 0) {
+49 │     const label = missing.length === 1 ? "column" : "columns";
+50 │     return {
+51 │       ok: false,
+52 │       error: `Missing required ${label}: ${missing.join(", ")}. Expected columns: ${KNOWN_COLUMNS.join(", ")}.`,
+53 │     };
+54 │   }
+55 │ 
+56 │   const rows: ParsedRow[] = [];
+57 │   let blankSkipped = 0;
+58 │   for (let i = headerIndex + 1; i < records.length; i++) {
+59 │     const cells = records[i];
+60 │     if (isBlank(cells)) {
+61 │       blankSkipped++;
+62 │       continue;
+63 │     }
+64 │     const cellAt = (column: CsvColumn) => {
+65 │       const index = columnIndex.get(column);
+66 │       return index === undefined ? "" : (cells[index] ?? "");
+67 │     };
+68 │     rows.push({
+69 │       rowNumber: i + 1,
+70 │       cells,
+71 │       fields: {
+72 │         title: cellAt("title"),
+73 │         due_date: cellAt("due_date"),
+74 │         priority: cellAt("priority"),
+75 │         notes: cellAt("notes"),
+76 │       },
+77 │     });
+78 │   }
+79 │ 
+80 │   return { ok: true, headers, rows, blankSkipped };
+81 │ }
+=== src/lib/csv/rejects.ts
+ 1 │ import Papa from "papaparse";
+ 2 │ import type { RejectedRow } from "./types";
+ 3 │ 
+ 4 │ /**
+ 5 │  * Builds the downloadable rejects file: row_number, the original columns, then reason.
+ 6 │  * Cells starting with = + - @ (tab or CR) get a leading ' so spreadsheets show them as text
+ 7 │  * rather than running them as formulae.
+ 8 │  */
+ 9 │ export function buildRejectsCsv(headers: string[], rejected: RejectedRow[]): string {
+10 │   const data = rejected.map((row) => {
+11 │     const cells = headers.map((_, index) => row.cells[index] ?? "");
+12 │     return [String(row.rowNumber), ...cells, row.reasons.join("; ")];
+13 │   });
+14 │   return Papa.unparse({ fields: ["row_number", ...headers, "reason"], data }, { newline: "\r\n", escapeFormulae: true });
+15 │ }
+=== src/lib/csv/types.ts
+ 1 │ export const REQUIRED_COLUMNS = ["title", "due_date", "priority"] as const;
+ 2 │ export const OPTIONAL_COLUMNS = ["notes"] as const;
+ 3 │ export const KNOWN_COLUMNS = [...REQUIRED_COLUMNS, ...OPTIONAL_COLUMNS] as const;
+ 4 │ export type CsvColumn = (typeof KNOWN_COLUMNS)[number];
+ 5 │ 
+ 6 │ export type CsvFields = Record<CsvColumn, string>;
+ 7 │ 
+ 8 │ export type ParsedRow = {
+ 9 │   /** Spreadsheet row number: the header is row 1. */
+10 │   rowNumber: number;
+11 │   /** Original cells, aligned with the file's headers (used for the rejects export). */
+12 │   cells: string[];
+13 │   /** Cells mapped to known columns; missing cells are "". */
+14 │   fields: CsvFields;
+15 │ };
+16 │ 
+17 │ export type ParseResult =
+18 │   | { ok: true; headers: string[]; rows: ParsedRow[]; blankSkipped: number }
+19 │   | { ok: false; error: string };
+20 │ 
+21 │ export type RejectedRow = {
+22 │   rowNumber: number;
+23 │   cells: string[];
+24 │   reasons: string[];
+25 │ };
+=== src/app/import/actions.ts
+ 1 │ "use server";
+ 2 │ 
+ 3 │ import { revalidatePath } from "next/cache";
+ 4 │ import { requireUser } from "@/lib/auth";
+ 5 │ import { MAX_FILE_BYTES, runImport, type ImportResult } from "@/lib/csv/import";
+ 6 │ 
+ 7 │ export type ImportState = { result?: ImportResult; fileName?: string };
+ 8 │ 
+ 9 │ const CSV_TYPES = new Set(["", "text/csv", "text/plain", "application/csv", "application/vnd.ms-excel"]);
+10 │ 
+11 │ const fail = (error: string, fileName?: string): ImportState => ({ result: { ok: false, error }, fileName });
+12 │ 
+13 │ /** Validates the upload, then imports it as the signed-in user. Never throws to the client. */
+14 │ export async function importCsv(_prev: ImportState, formData: FormData): Promise<ImportState> {
+15 │   const { supabase } = await requireUser();
+16 │ 
+17 │   const file = formData.get("file");
+18 │   if (!(file instanceof File) || file.name === "") return fail("Choose a CSV file to upload.");
+19 │   const fileName = file.name;
+20 │ 
+21 │   if (file.size === 0) return fail("The file is empty.", fileName);
+22 │   if (file.size > MAX_FILE_BYTES) return fail("The file is larger than 1 MB. Split it into smaller files.", fileName);
+23 │   if (!fileName.toLowerCase().endsWith(".csv") || !CSV_TYPES.has(file.type)) {
+24 │     return fail("Upload a .csv file.", fileName);
+25 │   }
+26 │ 
+27 │   let text: string;
+28 │   try {
+29 │     text = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer());
+30 │   } catch {
+31 │     return fail("The file isn't valid UTF-8 text. Save it as “CSV UTF-8” and try again.", fileName);
+32 │   }
+33 │   if (text.includes("\u0000")) return fail("This doesn't look like a CSV text file.", fileName);
+34 │ 
+35 │   try {
+36 │     const result = await runImport(supabase, text);
+37 │     if (result.ok && result.imported > 0) revalidatePath("/tasks");
+38 │     return { result, fileName };
+39 │   } catch (error) {
+40 │     console.error("import failed", error);
+41 │     return fail("The import failed and no rows were saved. Please try again.", fileName);
+42 │   }
+43 │ }
+=== src/app/tasks/actions.ts
+ 1 │ "use server";
+ 2 │ 
+ 3 │ import { revalidatePath } from "next/cache";
+ 4 │ import { requireUser } from "@/lib/auth";
+ 5 │ import { isTaskStatus, TASK_STATUSES, validateTaskInput } from "@/lib/tasks/validation";
+ 6 │ 
+ 7 │ export type TaskFormState = {
+ 8 │   errors?: string[];
+ 9 │   /** Submitted values, echoed back so the form keeps them after a failed save. */
+10 │   values?: Record<string, string>;
+11 │   /** Changes on every successful save so the form can reset. */
+12 │   savedAt?: number;
+13 │ };
+14 │ 
+15 │ export type TaskActionResult = { error?: string };
+16 │ 
+17 │ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+18 │ const DUPLICATE_MESSAGE = "A task with this title and due date already exists.";
+19 │ const GENERIC_MESSAGE = "Something went wrong saving the task. Please try again.";
+20 │ 
+21 │ function readForm(formData: FormData) {
+22 │   const values = {
+23 │     title: String(formData.get("title") ?? ""),
+24 │     due_date: String(formData.get("due_date") ?? ""),
+25 │     priority: String(formData.get("priority") ?? ""),
+26 │     notes: String(formData.get("notes") ?? ""),
+27 │     status: String(formData.get("status") ?? "todo"),
+28 │   };
+29 │   const result = validateTaskInput(values);
+30 │   const errors = result.ok ? [] : [...result.errors];
+31 │   if (!isTaskStatus(values.status)) errors.push(`status must be one of: ${TASK_STATUSES.join(", ")}`);
+32 │   if (!result.ok || errors.length > 0) return { ok: false as const, errors, values };
+33 │   return { ok: true as const, task: { ...result.value, status: values.status as (typeof TASK_STATUSES)[number] }, values };
+34 │ }
+35 │ 
+36 │ function saveError(error: { code?: string; message: string }, values: Record<string, string>): TaskFormState {
+37 │   if (error.code === "23505") return { errors: [DUPLICATE_MESSAGE], values };
+38 │   console.error("task save failed", { code: error.code, message: error.message });
+39 │   return { errors: [GENERIC_MESSAGE], values };
+40 │ }
+41 │ 
+42 │ export async function createTask(_prev: TaskFormState, formData: FormData): Promise<TaskFormState> {
+43 │   const { supabase } = await requireUser();
+44 │   const form = readForm(formData);
+45 │   if (!form.ok) return { errors: form.errors, values: form.values };
+46 │ 
+47 │   const { error } = await supabase.from("tasks").insert(form.task);
+48 │   if (error) return saveError(error, form.values);
+49 │ 
+50 │   revalidatePath("/tasks");
+51 │   return { savedAt: Date.now() };
+52 │ }
+53 │ 
+54 │ export async function updateTask(id: string, _prev: TaskFormState, formData: FormData): Promise<TaskFormState> {
+55 │   const { supabase } = await requireUser();
+56 │   if (!UUID.test(id)) return { errors: ["Task not found."] };
+57 │   const form = readForm(formData);
+58 │   if (!form.ok) return { errors: form.errors, values: form.values };
+59 │ 
+60 │   const { data, error } = await supabase
+61 │     .from("tasks")
+62 │     .update(form.task)
+63 │     .eq("id", id)
+64 │     .is("deleted_at", null)
+65 │     .select("id");
+66 │   if (error) return saveError(error, form.values);
+67 │   if (data.length === 0) return { errors: ["Task not found."], values: form.values };
+68 │ 
+69 │   revalidatePath("/tasks");
+70 │   return { savedAt: Date.now() };
+71 │ }
+72 │ 
+73 │ async function updateOne(id: string, patch: { status?: "todo" | "done"; deleted_at?: string }): Promise<TaskActionResult> {
+74 │   const { supabase } = await requireUser();
+75 │   if (!UUID.test(id)) return { error: "Task not found." };
+76 │ 
+77 │   const { data, error } = await supabase.from("tasks").update(patch).eq("id", id).is("deleted_at", null).select("id");
+78 │   if (error) {
+79 │     console.error("task update failed", { code: error.code, message: error.message });
+80 │     return { error: GENERIC_MESSAGE };
+81 │   }
+82 │   if (data.length === 0) return { error: "Task not found." };
+83 │ 
+84 │   revalidatePath("/tasks");
+85 │   return {};
+86 │ }
+87 │ 
+88 │ export async function setCompleted(id: string, completed: boolean): Promise<TaskActionResult> {
+89 │   return updateOne(id, { status: completed ? "done" : "todo" });
+90 │ }
+91 │ 
+92 │ /** Soft delete: the row stays in the database with deleted_at set. */
+93 │ export async function deleteTask(id: string): Promise<TaskActionResult> {
+94 │   return updateOne(id, { deleted_at: new Date().toISOString() });
+95 │ }
+=== src/lib/tasks/queries.ts
+ 1 │ import type { SupabaseClient } from "@supabase/supabase-js";
+ 2 │ import type { Database } from "@/lib/supabase/database.types";
+ 3 │ import { isTaskStatus, type TaskStatus } from "./validation";
+ 4 │ 
+ 5 │ export const LIST_LIMIT = 500;
+ 6 │ 
+ 7 │ export type Task = Pick<
+ 8 │   Database["public"]["Tables"]["tasks"]["Row"],
+ 9 │   "id" | "title" | "notes" | "due_date" | "priority" | "status"
+10 │ >;
+11 │ 
+12 │ export type TaskFilters = { q: string; status: TaskStatus | null; priority: number | null };
+13 │ 
+14 │ type SearchParams = Record<string, string | string[] | undefined>;
+15 │ 
+16 │ const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value) ?? "";
+17 │ 
+18 │ /** Reads filters from URL search params, ignoring anything invalid. */
+19 │ export function parseFilters(params: SearchParams): TaskFilters {
+20 │   const q = first(params.q).trim().slice(0, 200);
+21 │   const status = first(params.status);
+22 │   const priority = first(params.priority);
+23 │   return {
+24 │     q,
+25 │     status: isTaskStatus(status) ? status : null,
+26 │     priority: /^[1-5]$/.test(priority) ? Number(priority) : null,
+27 │   };
+28 │ }
+29 │ 
+30 │ export const hasActiveFilters = (f: TaskFilters) => Boolean(f.q || f.status || f.priority);
+31 │ 
+32 │ /**
+33 │  * Builds a PostgREST `or` filter for a case-insensitive substring match on title and notes.
+34 │  * LIKE wildcards in the search text are escaped so they match literally, and the value is
+35 │  * double-quoted so commas and parentheses can't break out of the filter syntax.
+36 │  */
+37 │ export function searchFilter(q: string): string {
+38 │   const likeEscaped = q.replace(/[\\%_]/g, (c) => `\\${c}`);
+39 │   const quoted = `"${`%${likeEscaped}%`.replace(/[\\"]/g, (c) => `\\${c}`)}"`;
+40 │   return `title.ilike.${quoted},notes.ilike.${quoted}`;
+41 │ }
+42 │ 
+43 │ type Client = SupabaseClient<Database>;
+44 │ 
+45 │ /** Live (not deleted) tasks for the signed-in user; RLS scopes rows to that user. */
+46 │ export async function listTasks(supabase: Client, filters: TaskFilters): Promise<Task[]> {
+47 │   let query = supabase
+48 │     .from("tasks")
+49 │     .select("id, title, notes, due_date, priority, status")
+50 │     .is("deleted_at", null);
+51 │ 
+52 │   if (filters.status) query = query.eq("status", filters.status);
+53 │   if (filters.priority) query = query.eq("priority", filters.priority);
+54 │   if (filters.q) query = query.or(searchFilter(filters.q));
+55 │ 
+56 │   const { data, error } = await query
+57 │     .order("due_date", { ascending: true })
+58 │     .order("priority", { ascending: true })
+59 │     .order("created_at", { ascending: true })
+60 │     .limit(LIST_LIMIT);
+61 │ 
+62 │   if (error) throw new Error(`Could not load tasks: ${error.message}`);
+63 │   return data;
+64 │ }
+65 │ 
+66 │ export async function countLiveTasks(supabase: Client): Promise<number> {
+67 │   const { count, error } = await supabase
+68 │     .from("tasks")
+69 │     .select("id", { count: "exact", head: true })
+70 │     .is("deleted_at", null);
+71 │   if (error) throw new Error(`Could not count tasks: ${error.message}`);
+72 │   return count ?? 0;
+73 │ }
+=== src/lib/tasks/validation.ts
+  1 │ // Single source of truth for task field rules, shared by the task form and CSV import (R6).
+  2 │ 
+  3 │ export const TITLE_MAX_LENGTH = 200;
+  4 │ export const NOTES_MAX_LENGTH = 2000;
+  5 │ export const TASK_STATUSES = ["todo", "in_progress", "done"] as const;
+  6 │ export type TaskStatus = (typeof TASK_STATUSES)[number];
+  7 │ 
+  8 │ export const STATUS_LABELS: Record<TaskStatus, string> = {
+  9 │   todo: "To do",
+ 10 │   in_progress: "In progress",
+ 11 │   done: "Done",
+ 12 │ };
+ 13 │ 
+ 14 │ export type TaskInput = {
+ 15 │   title: string;
+ 16 │   due_date: string;
+ 17 │   priority: number;
+ 18 │   notes: string | null;
+ 19 │ };
+ 20 │ 
+ 21 │ export type RawTaskInput = {
+ 22 │   title?: unknown;
+ 23 │   due_date?: unknown;
+ 24 │   priority?: unknown;
+ 25 │   notes?: unknown;
+ 26 │ };
+ 27 │ 
+ 28 │ export type ValidationResult =
+ 29 │   | { ok: true; value: TaskInput }
+ 30 │   | { ok: false; errors: string[] };
+ 31 │ 
+ 32 │ export const MESSAGES = {
+ 33 │   titleRequired: "title is required",
+ 34 │   titleTooLong: `title must be ${TITLE_MAX_LENGTH} characters or fewer`,
+ 35 │   dueDateRequired: "due_date is required",
+ 36 │   dueDateInvalid: "due_date must be a real date in YYYY-MM-DD format",
+ 37 │   priorityRequired: "priority is required",
+ 38 │   priorityInvalid: "priority must be a whole number from 1 to 5",
+ 39 │   notesTooLong: `notes must be ${NOTES_MAX_LENGTH} characters or fewer`,
+ 40 │ } as const;
+ 41 │ 
+ 42 │ const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+ 43 │ const PRIORITY_PATTERN = /^[1-5]$/;
+ 44 │ 
+ 45 │ function asTrimmedString(value: unknown): string {
+ 46 │   if (value === null || value === undefined) return "";
+ 47 │   return String(value).trim();
+ 48 │ }
+ 49 │ 
+ 50 │ /** True when `value` is YYYY-MM-DD and names a day that exists on the calendar. */
+ 51 │ export function isValidIsoDate(value: string): boolean {
+ 52 │   const match = DATE_PATTERN.exec(value);
+ 53 │   if (!match) return false;
+ 54 │   const [year, month, day] = match.slice(1).map(Number);
+ 55 │   // Year 0 doesn't exist in Postgres's (proleptic Gregorian, AD) date type.
+ 56 │   if (year < 1) return false;
+ 57 │   const date = new Date(0);
+ 58 │   // setUTCFullYear avoids Date.UTC's 0–99 → 1900–1999 mapping.
+ 59 │   date.setUTCFullYear(year, month - 1, day);
+ 60 │   return (
+ 61 │     date.getUTCFullYear() === year &&
+ 62 │     date.getUTCMonth() === month - 1 &&
+ 63 │     date.getUTCDate() === day
+ 64 │   );
+ 65 │ }
+ 66 │ 
+ 67 │ /** Validates every field and returns all failure reasons, not just the first. */
+ 68 │ export function validateTaskInput(raw: RawTaskInput): ValidationResult {
+ 69 │   const errors: string[] = [];
+ 70 │ 
+ 71 │   const title = asTrimmedString(raw.title);
+ 72 │   if (title === "") errors.push(MESSAGES.titleRequired);
+ 73 │   else if ([...title].length > TITLE_MAX_LENGTH) errors.push(MESSAGES.titleTooLong);
+ 74 │ 
+ 75 │   const dueDate = asTrimmedString(raw.due_date);
+ 76 │   if (dueDate === "") errors.push(MESSAGES.dueDateRequired);
+ 77 │   else if (!isValidIsoDate(dueDate)) errors.push(MESSAGES.dueDateInvalid);
+ 78 │ 
+ 79 │   const priorityText = asTrimmedString(raw.priority);
+ 80 │   if (priorityText === "") errors.push(MESSAGES.priorityRequired);
+ 81 │   else if (!PRIORITY_PATTERN.test(priorityText)) errors.push(MESSAGES.priorityInvalid);
+ 82 │ 
+ 83 │   const notes = asTrimmedString(raw.notes);
+ 84 │   if ([...notes].length > NOTES_MAX_LENGTH) errors.push(MESSAGES.notesTooLong);
+ 85 │ 
+ 86 │   if (errors.length > 0) return { ok: false, errors };
+ 87 │ 
+ 88 │   return {
+ 89 │     ok: true,
+ 90 │     value: {
+ 91 │       title,
+ 92 │       due_date: dueDate,
+ 93 │       priority: Number(priorityText),
+ 94 │       notes: notes === "" ? null : notes,
+ 95 │     },
+ 96 │   };
+ 97 │ }
+ 98 │ 
+ 99 │ export function isTaskStatus(value: unknown): value is TaskStatus {
+100 │   return typeof value === "string" && (TASK_STATUSES as readonly string[]).includes(value);
+101 │ }
+=== src/lib/auth.ts
+ 1 │ import "server-only";
+ 2 │ import { redirect } from "next/navigation";
+ 3 │ import { cache } from "react";
+ 4 │ import { createClient } from "@/lib/supabase/server";
+ 5 │ 
+ 6 │ /** The current user (validated with the auth server), or null. Deduplicated per request. */
+ 7 │ export const getCurrentUser = cache(async () => {
+ 8 │   const supabase = await createClient();
+ 9 │   const { data, error } = await supabase.auth.getUser();
+10 │   if (error || !data.user) return { supabase, user: null };
+11 │   return { supabase, user: { id: data.user.id, email: data.user.email ?? "" } };
+12 │ });
+13 │ 
+14 │ /** Use in every Server Action and data read: redirects to /login when signed out. */
+15 │ export async function requireUser() {
+16 │   const { supabase, user } = await getCurrentUser();
+17 │   if (!user) redirect("/login");
+18 │   return { supabase, user };
+19 │ }
+=== src/proxy.ts
+ 1 │ import { createServerClient } from "@supabase/ssr";
+ 2 │ import { NextResponse, type NextRequest } from "next/server";
+ 3 │ import { supabaseEnv } from "@/lib/supabase/env";
+ 4 │ 
+ 5 │ const PUBLIC_PATHS = ["/login"];
+ 6 │ 
+ 7 │ /**
+ 8 │  * Refreshes the Supabase session cookie and makes an optimistic redirect.
+ 9 │  * This is not the authorisation check: requireUser() and RLS are.
+10 │  */
+11 │ export async function proxy(request: NextRequest) {
+12 │   let response = NextResponse.next({ request });
+13 │   const { url, publishableKey } = supabaseEnv();
+14 │ 
+15 │   const supabase = createServerClient(url, publishableKey, {
+16 │     cookies: {
+17 │       getAll() {
+18 │         return request.cookies.getAll();
+19 │       },
+20 │       setAll(cookiesToSet, headers) {
+21 │         for (const { name, value } of cookiesToSet) request.cookies.set(name, value);
+22 │         response = NextResponse.next({ request });
+23 │         for (const { name, value, options } of cookiesToSet) response.cookies.set(name, value, options);
+24 │         for (const [key, value] of Object.entries(headers ?? {})) response.headers.set(key, value);
+25 │       },
+26 │     },
+27 │   });
+28 │ 
+29 │   // getClaims validates the JWT and refreshes an expired session (writing new cookies above).
+30 │   const { data } = await supabase.auth.getClaims();
+31 │   const signedIn = Boolean(data?.claims);
+32 │   const { pathname } = request.nextUrl;
+33 │   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+34 │ 
+35 │   if (!signedIn && !isPublic) return redirectKeepingCookies(request, response, "/login");
+36 │   if (signedIn && isPublic) return redirectKeepingCookies(request, response, "/tasks");
+37 │   return response;
+38 │ }
+39 │ 
+40 │ function redirectKeepingCookies(request: NextRequest, from: NextResponse, pathname: string) {
+41 │   const target = request.nextUrl.clone();
+42 │   target.pathname = pathname;
+43 │   target.search = "";
+44 │   const redirect = NextResponse.redirect(target);
+45 │   for (const cookie of from.cookies.getAll()) redirect.cookies.set(cookie);
+46 │   return redirect;
+47 │ }
+48 │ 
+49 │ export const config = {
+50 │   matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
+51 │ };
+=== src/lib/supabase/server.ts
+ 1 │ import "server-only";
+ 2 │ import { createServerClient } from "@supabase/ssr";
+ 3 │ import { cookies } from "next/headers";
+ 4 │ import { connection } from "next/server";
+ 5 │ import type { Database } from "./database.types";
+ 6 │ import { supabaseEnv } from "./env";
+ 7 │ 
+ 8 │ /**
+ 9 │  * Supabase client acting as the signed-in user (publishable key + session cookies).
+10 │  * RLS is the security boundary; the app never uses the secret/service-role key.
+11 │  * Create one per request.
+12 │  */
+13 │ export async function createClient() {
+14 │   // Session reads and token checks use the current time, so always run them at request time
+15 │   // (Cache Components would otherwise flag supabase-js's Date.now() during prerendering).
+16 │   await connection();
+17 │   const cookieStore = await cookies();
+18 │   const { url, publishableKey } = supabaseEnv();
+19 │ 
+20 │   return createServerClient<Database>(url, publishableKey, {
+21 │     cookies: {
+22 │       getAll() {
+23 │         return cookieStore.getAll();
+24 │       },
+25 │       setAll(cookiesToSet) {
+26 │         try {
+27 │           for (const { name, value, options } of cookiesToSet) cookieStore.set(name, value, options);
+28 │         } catch {
+29 │           // Server Components can't set cookies. The Proxy refreshes the session instead.
+30 │         }
+31 │       },
+32 │     },
+33 │   });
+34 │ }
+=== src/lib/supabase/env.ts
+ 1 │ export function supabaseEnv() {
+ 2 │   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+ 3 │   const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+ 4 │   if (!url || !publishableKey) {
+ 5 │     throw new Error(
+ 6 │       "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY. Copy .env.example to .env.local.",
+ 7 │     );
+ 8 │   }
+ 9 │   return { url, publishableKey };
+10 │ }
+=== src/app/login/actions.ts
+ 1 │ "use server";
+ 2 │ 
+ 3 │ import { redirect } from "next/navigation";
+ 4 │ import { createClient } from "@/lib/supabase/server";
+ 5 │ 
+ 6 │ export type AuthFormState = { error?: string; message?: string; email?: string };
+ 7 │ 
+ 8 │ export async function authenticate(_prev: AuthFormState, formData: FormData): Promise<AuthFormState> {
+ 9 │   const intent = formData.get("intent") === "signup" ? "signup" : "signin";
+10 │   const email = String(formData.get("email") ?? "").trim();
+11 │   const password = String(formData.get("password") ?? "");
+12 │ 
+13 │   if (!email || !password) return { error: "Enter your email and password.", email };
+14 │ 
+15 │   const supabase = await createClient();
+16 │ 
+17 │   if (intent === "signin") {
+18 │     const { error } = await supabase.auth.signInWithPassword({ email, password });
+19 │     if (error) return { error: "Incorrect email or password.", email };
+20 │   } else {
+21 │     if (password.length < 8) return { error: "Use a password of at least 8 characters.", email };
+22 │     const { data, error } = await supabase.auth.signUp({ email, password });
+23 │     // Generic on purpose: don't reveal whether an email already has an account.
+24 │     if (error) return { error: "Couldn't create an account with these details. If you already have one, sign in.", email };
+25 │     if (!data.session) return { message: "Check your email to confirm your account, then sign in.", email };
+26 │   }
+27 │ 
+28 │   redirect("/tasks");
+29 │ }
+30 │ 
+31 │ export async function signOut() {
+32 │   const supabase = await createClient();
+33 │   await supabase.auth.signOut();
+34 │   redirect("/login");
+35 │ }

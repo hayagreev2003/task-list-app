@@ -238,4 +238,4 @@ docs/                      Requirements and implementation plan
 
 ## AI usage
 
-This project is built with AI assistance (Claude Code). Planning artefacts are in `docs/`. Session transcripts are not included yet: they will be added to `ai-log/` after a privacy check.
+This project is built with AI assistance (Claude Code). Planning artefacts are in `docs/`. Claude Code session transcripts are in [`ai-log/`](ai-log/), with an index and a note on the personal data that was redacted.
