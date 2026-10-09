@@ -84,6 +84,7 @@ The first `db:start` downloads the Supabase images and takes a few minutes. Loca
 3. Add a task, tick it done, edit it, search for it, and filter by status tab and priority.
 4. Open **Import CSV** and upload `samples/edge-case.csv`: 4 imported, 5 rejected, 1 blank row skipped (see below). Upload it again and every valid row is reported as "already exists in your tasks".
 5. Download the rejected rows, fix them, and upload that file.
+6. For a fuller demo, upload `samples/demo.csv` (10 imported, 13 rejected, 2 blank rows skipped; see below).
 
 Other commands:
 
@@ -171,6 +172,37 @@ docs/                      Requirements and implementation plan
   | 11 | Team lunch, empty notes | imported |
 
   Row 10 spans two physical lines, so row 11 is on line 12. Row numbers follow records, which is what a spreadsheet shows.
+- [`samples/demo.csv`](samples/demo.csv) is a fuller file for demos, mixing fair rows with every row-level problem. It starts with a UTF-8 byte-order mark and uses CRLF line endings. Its header is `Priority,Title,Due_Date,Notes,Owner`: the columns are in a different order and case, and `Owner` is an extra column that is ignored. It imports **10** rows, rejects **13** and skips **2** blank rows:
+
+  | Row | Content | Result |
+  | --- | --- | --- |
+  | 2 | Submit quarterly report | imported |
+  | 3 | `"Buy milk, eggs and bread"` (quoted commas in title and notes) | imported |
+  | 4 | `"Prepare ""Q4"" slides"` (escaped quotes), empty notes | imported |
+  | 5 | Plan team offsite, notes with a line break | imported |
+  | 6 | due date `2028-02-29` (leap day) | imported |
+  | 7 | `Café supplies ☕` (non-English characters and emoji) | imported |
+  | 8 | notes starting with `=SUM(…)` | imported, stored as text |
+  | 9 | `"  Water the plants  "` | imported with the spaces trimmed |
+  | 10 | `"  BUY MILK, EGGS AND BREAD "`, same date as row 3 | rejected: duplicate of row 3 |
+  | 11 | same title as row 3 on a different date | imported (not a duplicate) |
+  | 12 | `,,,,` | skipped as blank |
+  | 13 | priority `high` | rejected: priority must be a whole number from 1 to 5 |
+  | 14 | priority `2.5` | rejected: priority must be a whole number from 1 to 5 |
+  | 15 | priority `0` | rejected: priority must be a whole number from 1 to 5 |
+  | 16 | priority `6` | rejected: priority must be a whole number from 1 to 5 |
+  | 17 | empty title | rejected: title is required |
+  | 18 | empty due date | rejected: due_date is required |
+  | 19 | due date `05/01/2026` | rejected: due_date must be a real date in YYYY-MM-DD format |
+  | 20 | due date `2026-02-30` | rejected: due_date must be a real date in YYYY-MM-DD format |
+  | 21 | due date `2027-02-29` (not a leap year) | rejected: due_date must be a real date in YYYY-MM-DD format |
+  | 22 | 201-character title | rejected: title must be 200 characters or fewer |
+  | 23 | 2,001-character notes | rejected: notes must be 2000 characters or fewer |
+  | 24 | no title, due date `13/13/2026`, priority `urgent` | rejected with all three reasons |
+  | 25 | cells containing only spaces | skipped as blank |
+  | 26 | Tidy the shared drive | imported |
+
+  Uploading it a second time imports nothing: the 10 valid rows are reported as "already exists in your tasks", and row 10 is still a duplicate of row 3.
 - [`samples/valid.csv`](samples/valid.csv): four clean rows.
 
 ## Design decisions

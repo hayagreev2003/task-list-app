@@ -1,0 +1,27 @@
+﻿Priority,Title,Due_Date,Notes,Owner
+2,Submit quarterly report,2026-11-14,Send to the finance team,Team A
+1,"Buy milk, eggs and bread",2026-11-02,"From the corner shop, not the supermarket",Team A
+3,"Prepare ""Q4"" slides",2026-11-20,,Team B
+4,Plan team offsite,2026-12-05,"Day 1: workshops
+Day 2: travel back",Team B
+5,Renew domain name,2028-02-29,2028 is a leap year so 29 February is real,Team C
+2,Café supplies ☕,2026-11-09,Non-English characters and emoji in the title,Team C
+3,Check budget totals,2026-11-18,=SUM(B2:B9) should match the invoice,Team A
+"3","  Water the plants  ",2026-11-03,Spaces around the title are trimmed,Team C
+4,"  BUY MILK, EGGS AND BREAD ",2026-11-02,Same as row 3 with different case and spacing,Team A
+2,"Buy milk, eggs and bread",2026-11-09,Same title on a different date is not a duplicate,Team A
+,,,,
+high,Book flights,2026-11-25,Priority is a word,Team B
+2.5,Call the bank,2026-11-11,Priority is a decimal,Team B
+0,Clean the fridge,2026-11-13,Priority below 1,Team C
+6,Fix the printer,2026-11-16,Priority above 5,Team C
+2,,2026-11-12,Title is missing,Team C
+3,Order new chairs,,Due date is missing,Team C
+2,Renew passport,05/01/2026,Date is not in YYYY-MM-DD format,Team A
+1,Pay rent,2026-02-30,30 February does not exist,Team A
+2,Annual review,2027-02-29,2027 is not a leap year,Team B
+3,Draft the annual planning memo covering budget and hiring and travel and risks Draft the annual planning memo covering budget and hiring and travel and risks Draft the annual planning memo covering bud,2026-11-21,Title is 201 characters,Team B
+3,Write the handbook,2026-11-22,"Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go on far too long. Notes that go onX",Team B
+urgent,,13/13/2026,"Three problems in one row: no title, bad date, bad priority",Team C
+  ,  , ,,
+5,Tidy the shared drive,2026-12-15,Last row in the file,Team A
