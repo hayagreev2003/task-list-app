@@ -9,34 +9,43 @@ A small task-list web app where each signed-in user manages their own tasks and 
 ## What the app does
 
 ### Accounts and privacy
-- Create an account in steps: enter your email, follow the link we email you, then set and confirm a password and sign in with it.
-- Sign in with email and password.
+- Create an account in steps: enter your email, follow the link we email you (valid for 1 hour), then set and confirm a password and sign in with it. The "check your email" screen can resend the link or go back to change the address.
+- Passwords must be 8 to 72 characters (bcrypt, which Supabase Auth uses, reads only the first 72 bytes).
+- Until the password is set, the account can only reach `/set-password`.
+- Sign in with email and password. A wrong email or password gives one generic message.
+- The header shows **Tasks** and **Import CSV** tabs and an account menu (initials avatar) with the signed-in email and **Sign out**.
 - Every user sees **only their own tasks**. This is enforced in the database with row-level security, not only in application code, so a bug in the UI or API can't leak another user's data.
 
 ### Tasks
 - Each task has a **title** (required, up to 200 characters), **notes** (up to 2,000 characters), **due date**, **priority** (1–5) and **status** (to do, in progress, done).
-- Create, edit, mark complete (and reopen), and delete tasks.
+- Create tasks from the **Add a task** panel; edit them inline, tick the checkbox to mark them done (untick to reopen), and delete them after an inline "Delete this task?" confirmation.
 - Deleting is a **soft delete**: the task disappears from your list but is kept in the database.
+- Adding or editing a task to match the title and due date of another live task is refused with "A task with this title and due date already exists."
 
 ### Task list
-- Search across titles and notes.
-- Filter by status and priority. Filters live in the URL, so a filtered view can be bookmarked.
+- Sorted by due date, then priority (1 is highest), then creation time.
+- Each task shows its due date with a relative label ("Due today", "Due tomorrow", "In 3 days", "2 days overdue") for tasks that aren't done, plus priority and status pills.
+- Search across titles and notes (case-insensitive; `%`, `_`, `*` and other special characters are matched literally).
+- Filter by status using tabs (All, To do, In progress, Done) that show how many tasks each would list, and by priority from a drop-down. Filters live in the URL, so a filtered view can be bookmarked.
 - Clear **loading**, **empty** ("no tasks yet" vs "no tasks match these filters") and **error** states.
 
 ### CSV import
-- Upload a CSV with the columns `title, due_date, priority, notes`. Header names are matched case-insensitively and in any order. Extra columns are ignored.
+- Upload a CSV whose first row is a header with the columns `title`, `due_date` and `priority`, and optionally `notes`. Header names are matched case-insensitively and in any order. Extra columns are ignored; a missing required column is reported by name.
 - **The server validates every row.** A row is rejected if:
   - the title is missing or longer than 200 characters
   - the due date is missing or not a real `YYYY-MM-DD` date (e.g. `2026-02-30` is rejected)
   - the priority is missing or not a whole number from 1 to 5 (e.g. `high`, `2.5`, `0`)
-- **Duplicates are detected** within the file and against your existing tasks. A duplicate is the same title (ignoring case and surrounding spaces) with the same due date. The first occurrence in a file is kept, and deleted tasks don't count.
+  - the notes are longer than 2,000 characters
+- **Duplicates are detected** within the file ("duplicate of row 2") and against your existing tasks ("already exists in your tasks"). A duplicate is the same title (ignoring case and surrounding spaces) with the same due date. The first occurrence in a file is kept, and deleted tasks don't count.
 - **Valid rows are imported in a single transaction.** Either all of them are saved or none are.
-- **Rejected rows are listed** with their spreadsheet row number and every reason they failed, and can be **downloaded as a CSV** to fix and re-upload. The file must be comma-separated and named `.csv`.
+- The result shows how many rows were imported, rejected and skipped as blank.
+- **Rejected rows are listed** with their spreadsheet row number and every reason they failed, and can be **downloaded as a CSV** (`<file>-rejected.csv`, with `row_number` and `reason` columns added) to fix and re-upload.
+- The file must be comma-separated, UTF-8 and named `.csv`.
 - Robust to messy files: quoted fields containing commas, quotes or line breaks, Windows (CRLF) line endings, a UTF-8 byte-order mark, and blank rows. Blank rows are skipped and counted, not treated as errors.
-- Oversized, empty or malformed files produce a clear message, never a crash.
+- Oversized (over 1 MB or 5,000 rows), empty, non-UTF-8 or binary files, and files with an unclosed quote, produce a clear message, never a crash.
 
 ### Tests (`npm test`)
-- Validation rules and CSV parsing edge cases (unit tests, no database needed).
+- Validation rules, sign-up input checks and CSV parsing edge cases (unit tests, no database needed).
 - Duplicate handling within a file and against the account.
 - Cross-user isolation: one user can't read, edit or delete another user's tasks (integration tests against local Supabase).
 
@@ -56,11 +65,25 @@ A small task-list web app where each signed-in user manages their own tasks and 
 npm install
 npm run db:start                 # npx supabase start: Postgres, Auth and the API in Docker; applies migrations
 cp .env.example .env.local
-npx supabase status -o env       # copy API_URL, PUBLISHABLE_KEY and SECRET_KEY into .env.local
+npx supabase status -o env       # see the table below for where each value goes
 npm run dev                      # http://localhost:3000
 ```
 
-The first `db:start` downloads the Supabase images and takes a few minutes. Locally, sign-up emails aren't really sent: open Mailpit at http://127.0.0.1:54324 to find the verification link.
+| `supabase status` value | `.env.local` variable |
+| --- | --- |
+| `API_URL` | `NEXT_PUBLIC_SUPABASE_URL` |
+| `PUBLISHABLE_KEY` | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` |
+| `SECRET_KEY` | `SUPABASE_SECRET_KEY` (tests only; never read by the app) |
+
+The first `db:start` downloads the Supabase images and takes a few minutes. Locally, sign-up emails aren't really sent: open Mailpit at http://127.0.0.1:54324 to find the verification link. If Supabase Auth rate-limits the emails, sign-up shows "Too many emails requested. Wait a minute and try again." If port 3000 is taken, `npx next dev -p <port>` works: the allowed redirect URLs accept any local port for `/auth/confirm`.
+
+### Try it
+
+1. Go to `/signup`, enter an email, then open the link from Mailpit. You land on `/set-password`.
+2. Set a password. You are signed out and sent to `/login` with "Your password is set"; sign in.
+3. Add a task, tick it done, edit it, search for it, and filter by status tab and priority.
+4. Open **Import CSV** and upload `samples/edge-case.csv`: 4 imported, 5 rejected, 1 blank row skipped (see below). Upload it again and every valid row is reported as "already exists in your tasks".
+5. Download the rejected rows, fix them, and upload that file.
 
 Other commands:
 
@@ -78,10 +101,13 @@ Other commands:
 npm test
 ```
 
-Local Supabase must be running (`npm run db:start`) with `.env.local` filled in. The integration tests fail with a clear message rather than silently skipping if it isn't.
+Local Supabase must be running (`npm run db:start`) with `.env.local` filled in. The integration tests fail with a clear message rather than silently skipping if it isn't. Run them on Node 22+: on older Node, `supabase-js` fails with "Node.js detected but native WebSocket not found".
+
+The suite has 143 tests in 8 files:
 
 | File | Covers |
 | --- | --- |
+| `tests/unit/credentials.test.ts` | Sign-up email check, new-password rules (8 characters minimum, 72-byte maximum, confirmation match), accepted email-link types |
 | `tests/unit/validation.test.ts` | Title, `YYYY-MM-DD` date (format and real-calendar checks, leap years) and priority rules; all reasons reported together |
 | `tests/unit/csv-parse.test.ts` | Quoted commas, escaped quotes, quoted newlines, CRLF/LF/mixed endings, BOM, blank rows, header order/case, missing columns, unclosed quotes, row numbering, comma-only delimiter |
 | `tests/unit/plan-import.test.ts` | Valid/invalid split, every reason kept, 5,000-row limit |
@@ -91,6 +117,41 @@ Local Supabase must be running (`npm run db:start`) with `.env.local` filled in.
 | `tests/integration/tasks-queries.test.ts` | Search (including `%`, `_`, `*`, regex characters, commas, quotes, brackets taken literally) and combined filters |
 
 **How the isolation test was validated:** with RLS switched off on `public.tasks` (`alter table public.tasks disable row level security;`), four tests in `rls.test.ts` fail (list, read by id, update, soft delete). Re-enabling RLS makes them pass again.
+
+## Project layout
+
+```
+src/
+  proxy.ts                 Session refresh and optimistic redirects (Next.js 16 "Proxy", formerly middleware)
+  app/
+    login/ signup/         Sign-in and step 1 of sign-up (pages + Server Actions)
+    auth/confirm/route.ts  Landing route for the emailed link
+    set-password/          Final sign-up step
+    tasks/                 Task list page, Server Actions, error boundary
+    import/                CSV import page and Server Action
+  components/              UI (task form/list/item, filters, status tabs, import form, header menus)
+  lib/
+    auth.ts                getCurrentUser / requireUser
+    credentials.ts         Email and password rules for sign-up
+    tasks/                 Shared validation rules and list/count queries
+    csv/                   Parsing, import planning, rejects export
+    supabase/              Server client, env checks, generated database types
+supabase/
+  migrations/              Table, RLS policies, grants, import_tasks function
+  templates/               Sign-up email templates
+  config.toml              Local Supabase settings
+tests/unit/, tests/integration/
+samples/                   Example CSV files
+docs/                      Requirements and implementation plan
+```
+
+| Route | Who | What |
+| --- | --- | --- |
+| `/` | anyone | Redirects to `/tasks` |
+| `/login`, `/signup` | signed out | Signed-in users are sent on to `/tasks` (or `/set-password`) |
+| `/auth/confirm` | anyone | Exchanges the email link for a session; bad or expired links go back to `/signup` with an error |
+| `/set-password` | signed in, no password yet | Users who still need a password can't reach any other page |
+| `/tasks`, `/import` | signed in | Signed-out users are sent to `/login` |
 
 ## Sample CSV files
 
