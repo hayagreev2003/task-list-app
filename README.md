@@ -4,7 +4,7 @@ A small task-list web app where each signed-in user manages their own tasks and 
 
 > - Requirements: [`docs/brainstorms/2026-10-08-task-list-csv-import-requirements.md`](docs/brainstorms/2026-10-08-task-list-csv-import-requirements.md)
 > - Implementation plan: [`docs/plans/2026-10-08-001-feat-task-list-csv-import-plan.md`](docs/plans/2026-10-08-001-feat-task-list-csv-import-plan.md)
-> - Screen recording: _link to be added_
+> - Screen recording (3–5 min, app walkthrough and the CSV edge case): [Google Drive](https://drive.google.com/file/d/19ba8UNcx9-ey7rNgvpggYSBnxNH_IR_I/view?usp=sharing)
 
 ## What the app does
 
